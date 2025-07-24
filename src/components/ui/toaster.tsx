@@ -17,9 +17,9 @@ export function Toaster() {
         return (
           <Toast key={id} {...props}>
             {description && (
-              <div data-lov-name="ToastDescription">
+              <ToastDescription data-lov-name="ToastDescription">
                 {description}
-              </div>
+              </ToastDescription>
             )}
             {action}
             <ToastClose />
