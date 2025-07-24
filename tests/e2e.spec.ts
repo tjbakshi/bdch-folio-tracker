@@ -244,11 +244,11 @@ test.describe('BDC Analytics Application', () => {
     await expect(page.getByRole('heading', { name: 'BDC Investment Analytics API' })).toBeVisible();
     
     // Verify API info section
-    await expect(page.getByText('Quick Start Guide')).toBeVisible();
+    await expect(page.getByText('Quick Start Guide').first()).toBeVisible();
     
     // Verify endpoints are documented
-    await expect(page.getByText('/investments')).toBeVisible();
-    await expect(page.getByText('/export')).toBeVisible();
+    await expect(page.getByText('/investments').first()).toBeVisible();
+    await expect(page.getByText('/export').first()).toBeVisible();
     
     // Verify at least one API method is expandable
     await expect(page.locator('.opblock')).toBeVisible();
