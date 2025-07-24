@@ -149,6 +149,7 @@ export default function BDCAdmin() {
             disabled={!!processing}
             variant="default"
             data-testid="backfill-all-button"
+            className="z-10"
           >
             {processing === "backfill_all" ? (
               <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -162,6 +163,7 @@ export default function BDCAdmin() {
             disabled={!!processing}
             variant="outline"
             data-testid="setup-jobs-button"
+            className="z-20 relative"
           >
             {processing === "setup_jobs" ? (
               <Loader2 className="h-4 w-4 mr-2 animate-spin" />

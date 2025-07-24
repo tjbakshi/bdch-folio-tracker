@@ -16,11 +16,10 @@ export function Toaster() {
       {toasts.map(function ({ id, title, description, action, ...props }) {
         return (
           <Toast key={id} {...props}>
-            {title && <ToastTitle>{title}</ToastTitle>}
             {description && (
-              <ToastDescription data-lov-name="ToastDescription">
+              <div data-lov-name="ToastDescription">
                 {description}
-              </ToastDescription>
+              </div>
             )}
             {action}
             <ToastClose />
