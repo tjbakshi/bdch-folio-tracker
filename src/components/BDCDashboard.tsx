@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -8,25 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { TrendingDown, TrendingUp, DollarSign, AlertTriangle, Download, Search, Calendar } from "lucide-react";
-
-interface Investment {
-  id: string;
-  company_name: string;
-  business_description: string;
-  investment_tranche: string;
-  principal_amount: number;
-  fair_value: number;
-  filings: {
-    ticker: string;
-    filing_date: string;
-    filing_type: string;
-  };
-  investments_computed: Array<{
-    mark: number;
-    is_non_accrual: boolean;
-    quarter_year: string;
-  }>;
-}
+import { getInvestments, exportData } from "@/sdk";
+import type { Investment } from "@/sdk";
 
 interface PortfolioSummary {
   totalAssets: number;
@@ -58,17 +40,13 @@ export default function BDCDashboard() {
     try {
       setLoading(true);
       
-      // Fetch recent investments
-      const { data, error } = await supabase.functions.invoke('bdc-api', {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json'
-        }
+      // Fetch recent investments using the SDK
+      const result = await getInvestments({
+        page: 1,
+        limit: 100
       });
 
-      if (error) throw error;
-
-      const investmentData = data?.data || [];
+      const investmentData = result.data || [];
       setInvestments(investmentData);
 
       // Calculate portfolio summary
@@ -121,15 +99,10 @@ export default function BDCDashboard() {
         tranche: selectedTranche || undefined
       };
 
-      const response = await supabase.functions.invoke('bdc-api', {
-        method: 'POST',
-        body: filters
-      });
-
-      if (response.error) throw response.error;
+      const csvData = await exportData(filters);
 
       // Create download link
-      const blob = new Blob([response.data], { type: 'text/csv' });
+      const blob = new Blob([csvData], { type: 'text/csv' });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
