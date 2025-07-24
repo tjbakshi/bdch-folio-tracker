@@ -1,0 +1,109 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  NODE_VERSION: '18.x'
+  DENO_VERSION: '1.40.x'
+
+jobs:
+  test-build-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+
+    - name: Setup Deno
+      uses: denoland/setup-deno@v1
+      with:
+        deno-version: ${{ env.DENO_VERSION }}
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Run Deno tests
+      run: |
+        echo "Running SEC parsing tests..."
+        deno test --allow-net --allow-env supabase/functions/sec-extractor/parse_schedule_test.ts
+      env:
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
+    - name: Run front-end tests
+      run: npm test --if-present
+
+    - name: Build Vite application
+      run: |
+        echo "Building front-end application..."
+        npm run build
+      env:
+        VITE_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+
+    - name: Setup Supabase CLI
+      uses: supabase/setup-cli@v1
+      with:
+        version: latest
+
+    - name: Deploy Supabase Edge Functions
+      run: |
+        echo "Deploying Edge Functions..."
+        supabase login --service-role --service-role-key "${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}"
+        supabase link --project-ref "${{ secrets.SUPABASE_PROJECT_REF }}"
+        supabase functions deploy sec-extractor --project-ref "${{ secrets.SUPABASE_PROJECT_REF }}"
+        supabase functions deploy bdc-api --project-ref "${{ secrets.SUPABASE_PROJECT_REF }}"
+      env:
+        SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+    - name: Deploy to Vercel
+      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      uses: amondnet/vercel-action@v25
+      with:
+        vercel-token: ${{ secrets.VERCEL_TOKEN }}
+        vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+        vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+        vercel-args: '--prod'
+        working-directory: ./
+
+    # Alternative: Deploy to Netlify (uncomment if using Netlify instead)
+    # - name: Deploy to Netlify
+    #   if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    #   uses: nwtgck/actions-netlify@v2.1
+    #   with:
+    #     publish-dir: './dist'
+    #     production-branch: main
+    #     github-token: ${{ secrets.GITHUB_TOKEN }}
+    #     deploy-message: "Deploy from GitHub Actions"
+    #   env:
+    #     NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+    #     NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+
+    - name: Run E2E tests
+      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      run: |
+        echo "Running end-to-end tests against deployed application..."
+        # Add your E2E test commands here (e.g., Playwright, Cypress)
+        # npm run test:e2e
+      env:
+        TEST_BASE_URL: https://your-app.vercel.app
+
+    - name: Notify deployment status
+      if: always()
+      run: |
+        if [ "${{ job.status }}" == "success" ]; then
+          echo "✅ Deployment successful!"
+        else
+          echo "❌ Deployment failed!"
+          exit 1
+        fi
