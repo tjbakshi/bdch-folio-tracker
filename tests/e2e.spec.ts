@@ -31,10 +31,7 @@ test.describe('BDC Analytics Application', () => {
     await backfillButton.click();
     
     // Wait for success toast to appear
-    await expect(page.getByText(/started backfill/i).first()).toBeVisible({ timeout: 10000 });
-    
-    // Wait a moment for logs to potentially update
-    await page.waitForTimeout(3000);
+    await waitForToast(page, /started backfill/i);
     
     // Verify at least one log entry appears in recent logs
     const logsSection = page.getByTestId('processing-logs');
@@ -42,7 +39,7 @@ test.describe('BDC Analytics Application', () => {
     
     // Check that there's at least one log entry
     const logEntries = page.locator('[data-testid="log-entry"]');
-    await expect(logEntries.first()).toBeVisible();
+    await expect(logEntries).toHaveCountGreaterThan(0);
   });
 
   test('Dashboard Data Display', async ({ page }) => {
@@ -146,9 +143,6 @@ test.describe('BDC Analytics Application', () => {
       await page.getByRole('option').first().click();
     }
     
-    // Wait for filter to apply
-    await page.waitForTimeout(1000);
-    
     // Verify filtered results
     const tableRows = page.locator('[data-testid="investment-row"]');
     const firstRowManager = tableRows.first().getByTestId('manager-badge');
@@ -169,7 +163,7 @@ test.describe('BDC Analytics Application', () => {
     expect(download.suggestedFilename()).toMatch(/bdc-investments.*\.csv/);
     
     // Verify success toast appears
-    await expect(page.getByText(/export downloaded successfully/i).first()).toBeVisible();
+    await waitForToast(page, /export downloaded successfully/i);
   });
 
   test('Search and Filtering', async ({ page }) => {
@@ -186,9 +180,6 @@ test.describe('BDC Analytics Application', () => {
     // Enter search term
     await searchInput.fill('Tech');
     
-    // Wait for search to filter results
-    await page.waitForTimeout(1000);
-    
     // Verify search results contain the search term
     const tableRows = page.locator('[data-testid="investment-row"]');
     if (await tableRows.first().isVisible()) {
@@ -198,7 +189,6 @@ test.describe('BDC Analytics Application', () => {
     
     // Clear search
     await searchInput.clear();
-    await page.waitForTimeout(500);
     
     // Test tranche filter
     await page.waitForSelector('[data-testid="tranche-filter"]', { state: 'visible' });
@@ -210,9 +200,6 @@ test.describe('BDC Analytics Application', () => {
     const firstLienOption = page.getByRole('option', { name: 'First Lien' });
     if (await firstLienOption.isVisible()) {
       await firstLienOption.click();
-      
-      // Wait for filter to apply
-      await page.waitForTimeout(1000);
       
       // Verify filtered results show First Lien
       const firstRowTranche = tableRows.first().getByTestId('tranche-cell');
@@ -289,7 +276,7 @@ test.describe('BDC Analytics Application', () => {
     await setupJobsButton.click();
     
     // Wait for success toast
-    await expect(page.getByText(/scheduled jobs setup/i).first()).toBeVisible({ timeout: 10000 });
+    await waitForToast(page, /scheduled jobs setup/i);
     
     // Verify scheduled jobs table shows entries
     const jobsTable = page.getByTestId('scheduled-jobs-table');
@@ -297,7 +284,7 @@ test.describe('BDC Analytics Application', () => {
     
     // Check that at least one job entry exists
     const jobRows = page.locator('[data-testid="job-row"]');
-    await expect(jobRows.first()).toBeVisible();
+    await expect(jobRows).toHaveCountGreaterThan(0);
   });
 
   test('Error Handling', async ({ page }) => {
@@ -425,8 +412,6 @@ test.describe('BDC Analytics Application', () => {
     const allManagersOption = page.getByRole('option', { name: 'All Managers' });
     if (await allManagersOption.isVisible()) {
       await allManagersOption.click();
-      // Wait for filter to apply via POST
-      await page.waitForTimeout(1000);
     }
     
     console.log('✅ Dashboard successfully loaded using POST-only requests');
@@ -485,6 +470,6 @@ test.describe('BDC Analytics Application', () => {
  * Helper function to wait for toast to appear and disappear
  */
 async function waitForToast(page: Page, message: string | RegExp) {
-  await expect(page.getByText(message)).toBeVisible();
-  await expect(page.getByText(message)).toBeHidden({ timeout: 10000 });
+  await expect(page.getByText(message).first()).toBeVisible();
+  await expect(page.getByText(message).first()).toBeHidden({ timeout: 10000 });
 }
