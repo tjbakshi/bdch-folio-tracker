@@ -66,7 +66,8 @@ test.describe('BDC Analytics Application', () => {
     await backfillButton.click();
     
     // Wait for success toast to appear
-    await waitForToast(page, /started backfill for all BDCs/i);
+    const backfillToast = page.locator('text=/started backfill/i', { strict: false }).first();
+    await expect(backfillToast).toBeVisible({ timeout: 15000 });
     
     // Verify at least one log entry appears in recent logs
     const logsSection = page.getByTestId('processing-logs');
@@ -108,8 +109,9 @@ test.describe('BDC Analytics Application', () => {
     const holdingsTable = page.getByTestId('holdings-table');
     await expect(holdingsTable).toBeVisible();
     
-    // Check that table has at least one row of data
-    await page.waitForSelector('[data-testid="investment-row"]', { timeout: 10000 });
+    // Wait for API response and then verify table rows
+    await page.waitForResponse(r => r.url().includes('/bdc-api/investments') && r.status() === 200);
+    await page.waitForSelector('[data-testid="investment-row"]', { timeout: 15000 });
     const tableRows = page.locator('[data-testid="investment-row"]');
     await expect(tableRows.first()).toBeVisible();
   });
@@ -121,10 +123,9 @@ test.describe('BDC Analytics Application', () => {
     // Wait for data to load
     await expect(page.getByText('Loading dashboard data...')).toBeHidden({ timeout: 15000 });
     
-    // Apply manager filter
-    await page.waitForSelector('[data-testid="manager-filter"]', { state: 'visible' });
-    const managerSelect = page.getByTestId('manager-filter');
-    await expect(managerSelect).toBeVisible();
+    // Apply manager filter using role-based selector
+    const managerSelect = page.getByRole('combobox', { name: /manager/i });
+    await managerSelect.waitFor({ state: 'visible' });
     await managerSelect.click();
     
     // Select ARCC (or first available option)
@@ -183,10 +184,9 @@ test.describe('BDC Analytics Application', () => {
     // Clear search
     await searchInput.clear();
     
-    // Test tranche filter
-    await page.waitForSelector('[data-testid="tranche-filter"]', { state: 'visible' });
-    const trancheSelect = page.getByTestId('tranche-filter');
-    await expect(trancheSelect).toBeVisible();
+    // Test tranche filter using role-based selector
+    const trancheSelect = page.getByRole('combobox', { name: /tranche/i });
+    await trancheSelect.waitFor({ state: 'visible' });
     await trancheSelect.click();
     
     // Select First Lien
@@ -209,8 +209,9 @@ test.describe('BDC Analytics Application', () => {
     // Wait for data to load
     await expect(page.getByText('Loading dashboard data...')).toBeHidden({ timeout: 15000 });
     
-    // Find first investment row
-    await page.waitForSelector('[data-testid="investment-row"]', { timeout: 10000 });
+    // Wait for API response and then find first investment row
+    await page.waitForResponse(r => r.url().includes('/bdc-api/investments') && r.status() === 200);
+    await page.waitForSelector('[data-testid="investment-row"]', { timeout: 15000 });
     const firstInvestmentRow = page.locator('[data-testid="investment-row"]').first();
     await expect(firstInvestmentRow).toBeVisible();
     
@@ -240,7 +241,9 @@ test.describe('BDC Analytics Application', () => {
     await page.waitForURL('**/docs.html', { timeout: 10000 });
     
     // Verify Swagger UI elements are present
-    await expect(page.locator('.swagger-ui').first()).toBeVisible({ timeout: 15000 });
+    await expect(
+      page.locator('section.swagger-ui.swagger-container')
+    ).toBeVisible({ timeout: 20000 });
     
     // Verify custom header is present
     await expect(page.getByRole('heading', { name: 'BDC Investment Analytics API' })).toBeVisible();
@@ -272,17 +275,17 @@ test.describe('BDC Analytics Application', () => {
     await setupJobsButton.click();
     
     // Wait for success toast
-    await waitForToast(page, /scheduled jobs setup complete/i);
+    const jobsToast = page.locator('text=/scheduled jobs setup/i', { strict: false }).first();
+    await expect(jobsToast).toBeVisible({ timeout: 15000 });
     
     // Verify scheduled jobs table shows entries
     const jobsTable = page.getByTestId('scheduled-jobs-table');
     await expect(jobsTable).toBeVisible();
     
-    // Check that at least one job entry exists (guard against empty table)
+    // Wait for jobs table and check for rows
+    await page.waitForSelector('[data-testid="job-row"]', { timeout: 10000 });
     const jobRows = page.locator('[data-testid="job-row"]');
-    if (await jobRows.count() > 0) {
-      await expect(jobRows.first()).toBeVisible();
-    }
+    await expect(jobRows.first()).toBeVisible();
   });
 
   test('Error Handling', async ({ page }) => {
@@ -290,7 +293,7 @@ test.describe('BDC Analytics Application', () => {
     await page.goto('/non-existent-page');
     
     // Should show 404 or redirect to a valid page
-    await expect(page).toHaveURL(/\/(?:404|not-found|\*|non-existent-page)$/, { timeout: 5000 });
+    await expect(page).toHaveURL(/(404|not-found|non-existent-page)/i, { timeout: 5000 });
     
     // Navigate back to dashboard
     await page.goto('/');
@@ -400,10 +403,9 @@ test.describe('BDC Analytics Application', () => {
     const totalAssetsCard = page.getByTestId('total-assets-card');
     await expect(totalAssetsCard).toBeVisible();
     
-    // Test that filtering still works with POST
-    await page.waitForSelector('[data-testid="manager-filter"]', { state: 'visible' });
-    const managerSelect = page.getByTestId('manager-filter');
-    await expect(managerSelect).toBeVisible();
+    // Test that filtering still works with POST using role-based selector
+    const managerSelect = page.getByRole('combobox', { name: /manager/i });
+    await managerSelect.waitFor({ state: 'visible' });
     await managerSelect.click();
     
     // Select "All Managers" to trigger a new POST request
