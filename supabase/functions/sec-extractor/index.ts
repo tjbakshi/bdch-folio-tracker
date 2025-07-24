@@ -1,4 +1,7 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import "https://deno.land/x/xhr@0.1.0/mod.ts";
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import * as cheerio from 'https://esm.sh/cheerio@1.0.0-rc.12';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -327,36 +330,335 @@ async function downloadDocument(url: string): Promise<string> {
   return await response.text();
 }
 
+/**
+ * Parse Schedule of Investments from SEC filing HTML document
+ * Uses cheerio to robustly extract investment data from various table formats
+ * 
+ * @param document - Raw HTML content of SEC filing
+ * @returns Array of parsed investment data
+ */
 async function parseScheduleOfInvestments(document: string): Promise<InvestmentData[]> {
-  console.log('Parsing Schedule of Investments');
+  console.log('Parsing Schedule of Investments with enhanced HTML parsing');
   
   const investments: InvestmentData[] = [];
   
-  // Look for the schedule table in the document
-  // This is a simplified parser - in production, you'd want more robust parsing
-  const scheduleRegex = /CONSOLIDATED SCHEDULE OF INVESTMENTS|SCHEDULE OF INVESTMENTS/i;
-  const match = document.search(scheduleRegex);
-  
-  if (match === -1) {
-    console.warn('Schedule of Investments table not found in document');
+  try {
+    // Load HTML with cheerio
+    const $ = cheerio.load(document);
+    
+    // Find the Schedule of Investments table
+    const scheduleTable = findScheduleTable($);
+    
+    if (!scheduleTable) {
+      console.warn('Schedule of Investments table not found in document');
+      return investments;
+    }
+    
+    console.log('Found Schedule of Investments table');
+    
+    // Extract column mapping from header row
+    const columnMapping = extractColumnMapping($, scheduleTable);
+    
+    if (Object.keys(columnMapping).length < 3) {
+      console.warn('Insufficient column headers found, skipping table');
+      return investments;
+    }
+    
+    console.log('Column mapping:', columnMapping);
+    
+    // Extract investment rows
+    const rows = extractInvestmentRows($, scheduleTable, columnMapping);
+    
+    console.log(`Extracted ${rows.length} investment rows`);
+    
+    // Process each row into structured data
+    for (const row of rows) {
+      const investment = processInvestmentRow(row, columnMapping);
+      if (investment && investment.company_name) {
+        investments.push(investment);
+      }
+    }
+    
+    console.log(`Parsed ${investments.length} valid investments`);
+    return investments;
+    
+  } catch (error) {
+    console.error('Error parsing Schedule of Investments:', error);
     return investments;
   }
+}
 
-  // Extract table data starting from the schedule section
-  const scheduleSection = document.substring(match, match + 50000); // Get reasonable chunk
+/**
+ * Find the Schedule of Investments table in the document
+ * Looks for tables containing investment-related headers
+ */
+function findScheduleTable($: any): any {
+  const schedulePatterns = [
+    /consolidated\s+schedule\s+of\s+investments/i,
+    /schedule\s+of\s+investments/i,
+    /investment\s+portfolio/i
+  ];
   
-  // This is a basic implementation - you would enhance this with proper HTML/table parsing
-  // For now, we'll create a placeholder structure
-  investments.push({
-    company_name: 'Placeholder Company',
-    business_description: 'Extracted from parsing logic',
-    investment_tranche: 'Senior Secured',
-    principal_amount: 1000000,
-    fair_value: 980000
+  // Search for table headers that match schedule patterns
+  let targetTable = null;
+  
+  $('table').each((i: number, table: any) => {
+    const tableText = $(table).text();
+    
+    for (const pattern of schedulePatterns) {
+      if (pattern.test(tableText)) {
+        // Verify this table has investment-related columns
+        const headerScore = getTableHeaderScore($, table);
+        if (headerScore >= 4) {
+          targetTable = table;
+          return false; // Break out of each loop
+        }
+      }
+    }
   });
+  
+  return targetTable;
+}
 
-  console.log(`Parsed ${investments.length} investments`);
-  return investments;
+/**
+ * Score a table based on how many investment-related headers it contains
+ */
+function getTableHeaderScore($: any, table: any): number {
+  const expectedHeaders = [
+    /company|security|investment|name/i,
+    /principal|notional|cost|commitment/i,
+    /fair\s*value|value|market\s*value/i,
+    /tranche|type|description/i,
+    /coupon|rate|interest/i,
+    /maturity|date/i,
+    /industry|business|sector/i
+  ];
+  
+  const tableText = $(table).find('th, td').first().parent().parent().text().toLowerCase();
+  
+  let score = 0;
+  for (const pattern of expectedHeaders) {
+    if (pattern.test(tableText)) {
+      score++;
+    }
+  }
+  
+  return score;
+}
+
+/**
+ * Extract column mapping from the table header
+ */
+function extractColumnMapping($: any, table: any): { [key: string]: number } {
+  const mapping: { [key: string]: number } = {};
+  
+  // Find header row (usually first row with th elements or first row in general)
+  let headerRow = $(table).find('thead tr').first();
+  if (headerRow.length === 0) {
+    headerRow = $(table).find('tr').first();
+  }
+  
+  headerRow.find('th, td').each((index: number, cell: any) => {
+    const headerText = $(cell).text().trim().toLowerCase();
+    
+    // Map common header variations to standardized field names
+    if (/company|security|investment|name/i.test(headerText) && !mapping.company_name) {
+      mapping.company_name = index;
+    }
+    if (/business|description|industry|sector/i.test(headerText) && !mapping.business_description) {
+      mapping.business_description = index;
+    }
+    if (/tranche|type|class/i.test(headerText) && !mapping.investment_tranche) {
+      mapping.investment_tranche = index;
+    }
+    if (/coupon|interest\s*rate/i.test(headerText) && !mapping.coupon) {
+      mapping.coupon = index;
+    }
+    if (/spread|margin/i.test(headerText) && !mapping.spread) {
+      mapping.spread = index;
+    }
+    if (/principal|notional|cost|commitment/i.test(headerText) && !mapping.principal_amount) {
+      mapping.principal_amount = index;
+    }
+    if (/amortized\s*cost|cost/i.test(headerText) && !mapping.amortized_cost) {
+      mapping.amortized_cost = index;
+    }
+    if (/fair\s*value|market\s*value|value/i.test(headerText) && !mapping.fair_value) {
+      mapping.fair_value = index;
+    }
+    if (/acquisition|purchase|date/i.test(headerText) && !mapping.acquisition_date) {
+      mapping.acquisition_date = index;
+    }
+  });
+  
+  return mapping;
+}
+
+/**
+ * Extract investment data rows from the table
+ */
+function extractInvestmentRows($: any, table: any, columnMapping: { [key: string]: number }): string[][] {
+  const rows: string[][] = [];
+  
+  // Skip header rows and extract data rows
+  $(table).find('tr').each((index: number, row: any) => {
+    const $row = $(row);
+    
+    // Skip header rows (contain th elements or are first few rows)
+    if ($row.find('th').length > 0 || index === 0) {
+      return; // Continue to next row
+    }
+    
+    // Skip total/summary rows
+    const rowText = $row.text().toLowerCase();
+    if (/total|subtotal|^$/.test(rowText.trim())) {
+      return;
+    }
+    
+    // Extract cell values
+    const cells: string[] = [];
+    $row.find('td').each((cellIndex: number, cell: any) => {
+      let cellText = $(cell).text().trim();
+      
+      // Remove footnote markers (numbers in parentheses, asterisks, etc.)
+      cellText = cellText.replace(/\(\d+\)|\*+|†+/g, '').trim();
+      
+      cells[cellIndex] = cellText;
+    });
+    
+    // Only include rows with sufficient data
+    if (cells.length >= Math.max(...Object.values(columnMapping)) + 1) {
+      rows.push(cells);
+    }
+  });
+  
+  return rows;
+}
+
+/**
+ * Process a single investment row into structured data
+ */
+function processInvestmentRow(cells: string[], columnMapping: { [key: string]: number }): InvestmentData | null {
+  try {
+    const investment: InvestmentData = {};
+    
+    // Extract string fields
+    if (columnMapping.company_name !== undefined) {
+      investment.company_name = cleanTextValue(cells[columnMapping.company_name]);
+    }
+    
+    if (columnMapping.business_description !== undefined) {
+      investment.business_description = cleanTextValue(cells[columnMapping.business_description]);
+    }
+    
+    if (columnMapping.investment_tranche !== undefined) {
+      investment.investment_tranche = cleanTextValue(cells[columnMapping.investment_tranche]);
+    }
+    
+    if (columnMapping.coupon !== undefined) {
+      investment.coupon = cleanTextValue(cells[columnMapping.coupon]);
+    }
+    
+    if (columnMapping.spread !== undefined) {
+      investment.spread = cleanTextValue(cells[columnMapping.spread]);
+    }
+    
+    // Extract numeric fields
+    if (columnMapping.principal_amount !== undefined) {
+      investment.principal_amount = parseNumericValue(cells[columnMapping.principal_amount]);
+    }
+    
+    if (columnMapping.amortized_cost !== undefined) {
+      investment.amortized_cost = parseNumericValue(cells[columnMapping.amortized_cost]);
+    }
+    
+    if (columnMapping.fair_value !== undefined) {
+      investment.fair_value = parseNumericValue(cells[columnMapping.fair_value]);
+    }
+    
+    // Extract dates
+    if (columnMapping.acquisition_date !== undefined) {
+      investment.acquisition_date = parseDateValue(cells[columnMapping.acquisition_date]);
+    }
+    
+    // Parse reference rate from coupon if present
+    if (investment.coupon) {
+      const rateMatch = investment.coupon.match(/(LIBOR|SOFR|Prime|Base)\s*\+?\s*(\d+\.?\d*)/i);
+      if (rateMatch) {
+        investment.reference_rate = rateMatch[1];
+        investment.spread = rateMatch[2] + '%';
+      }
+    }
+    
+    return investment;
+    
+  } catch (error) {
+    console.error('Error processing investment row:', error);
+    return null;
+  }
+}
+
+/**
+ * Clean and normalize text values
+ */
+function cleanTextValue(value: string): string {
+  if (!value) return '';
+  
+  return value
+    .replace(/\s+/g, ' ')  // Normalize whitespace
+    .replace(/["']/g, '')  // Remove quotes
+    .trim();
+}
+
+/**
+ * Parse numeric values from text (handles thousands separators, parentheses for negative)
+ */
+function parseNumericValue(value: string): number | undefined {
+  if (!value || value.trim() === '' || value === '—' || value === '-') {
+    return undefined;
+  }
+  
+  // Remove dollar signs, commas, and whitespace
+  let cleaned = value.replace(/[$,\s]/g, '');
+  
+  // Handle negative values in parentheses
+  const isNegative = /^\(.*\)$/.test(cleaned);
+  if (isNegative) {
+    cleaned = cleaned.replace(/[()]/g, '');
+  }
+  
+  // Convert to number
+  const num = parseFloat(cleaned);
+  
+  if (isNaN(num)) {
+    return undefined;
+  }
+  
+  return isNegative ? -num : num;
+}
+
+/**
+ * Parse date values and convert to YYYY-MM-DD format
+ */
+function parseDateValue(value: string): string | undefined {
+  if (!value || value.trim() === '') {
+    return undefined;
+  }
+  
+  try {
+    // Handle various date formats
+    const date = new Date(value.trim());
+    
+    if (isNaN(date.getTime())) {
+      return undefined;
+    }
+    
+    // Return in YYYY-MM-DD format
+    return date.toISOString().split('T')[0];
+    
+  } catch (error) {
+    return undefined;
+  }
 }
 
 async function storeInvestment(supabase: any, filingId: string, investment: InvestmentData) {
