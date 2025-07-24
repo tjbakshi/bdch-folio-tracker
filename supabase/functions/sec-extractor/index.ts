@@ -2,27 +2,7 @@ import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import * as cheerio from 'https://esm.sh/cheerio@1.0.0-rc.12';
-import * as Sentry from "https://deno.land/x/sentry_serverless_deno@0.1.1/mod.ts";
-
-// Initialize Sentry for SEC Extractor
-const sentryDsn = Deno.env.get('SENTRY_DSN_EDGE');
-if (sentryDsn && !sentryDsn.includes('your-sentry-dsn')) {
-  Sentry.init({
-    dsn: sentryDsn,
-    environment: Deno.env.get('ENVIRONMENT') || 'production',
-    tracesSampleRate: 1.0,
-    beforeSend(event) {
-      event.contexts = {
-        ...event.contexts,
-        runtime: { name: 'deno', version: Deno.version.deno },
-        function: { name: 'sec-extractor', type: 'supabase-edge-function' }
-      };
-      return event;
-    }
-  });
-}
-// Note: Removing Sentry import to fix deployment issue
-// import * as Sentry from 'https://deno.land/x/sentry@7.81.1/index.ts';
+import { Sentry } from "../bdc-api/lib/sentry.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -58,53 +38,120 @@ interface InvestmentData {
 }
 
 Deno.serve(async (req) => {
-  console.log('SEC Extractor function called', new Date().toISOString());
+  return Sentry.withSentry(async () => {
+    // Start Sentry transaction for the entire request
+    const transaction = Sentry.startTransaction({
+      name: `SEC Extractor ${req.method} ${new URL(req.url).pathname}`,
+      op: 'http.server',
+      tags: {
+        'http.method': req.method,
+        'function.name': 'sec-extractor',
+      }
+    });
 
-  // Handle CORS preflight requests
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
-  }
+    console.log('SEC Extractor function called', new Date().toISOString());
 
-  try {
+    // Handle CORS preflight requests
+    if (req.method === 'OPTIONS') {
+      return new Response(null, { headers: corsHeaders });
+    }
+
+    try {
+      // Add request context to Sentry
+      Sentry.setContext('request', {
+        url: req.url,
+        method: req.method,
+        userAgent: req.headers.get('user-agent'),
+      });
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    const { action, ticker, yearsBack, years_back, filing_id, filing_type } = await req.json();
+      const { action, ticker, yearsBack, years_back, filing_id, filing_type } = await req.json();
 
-    console.log(`Processing action: ${action} for ticker: ${ticker || 'all'}`);
+      console.log(`Processing action: ${action} for ticker: ${ticker || 'all'}`);
+      
+      // Add action context to Sentry
+      Sentry.setContext('action', { action, ticker, filing_id, filing_type });
+      Sentry.setTag('action', action);
+      if (ticker) Sentry.setTag('ticker', ticker);
 
-    switch (action) {
-      case 'backfill_all':
-        return await backfillAllBDCs(supabase);
-      
-      case 'backfill_ticker':
-        return await backfillTicker(supabase, ticker, yearsBack || years_back || 3);
-      
-      case 'extract_filing':
-        return await extractFiling(supabase, filing_id);
-      
-      case 'incremental_check':
-        return await incrementalFilingCheck(supabase, ticker, filing_type);
-      
-      case 'setup_scheduled_jobs':
-        return await setupScheduledJobs(supabase);
-      
-      default:
-        throw new Error(`Unknown action: ${action}`);
-    }
+      let response: Response;
 
-  } catch (error) {
-    console.error('Error in SEC extractor:', error);
-    return new Response(
-      JSON.stringify({ error: error.message }),
-      { 
-        status: 500, 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      switch (action) {
+        case 'backfill_all':
+          response = await Sentry.startSpan(
+            { name: 'backfillAllBDCs', op: 'sec.backfill' },
+            async () => await backfillAllBDCs(supabase)
+          );
+          break;
+        
+        case 'backfill_ticker':
+          response = await Sentry.startSpan(
+            { name: 'backfillTicker', op: 'sec.backfill' },
+            async () => await backfillTicker(supabase, ticker, yearsBack || years_back || 3)
+          );
+          break;
+        
+        case 'extract_filing':
+          response = await Sentry.startSpan(
+            { name: 'extractFiling', op: 'sec.extract' },
+            async () => await extractFiling(supabase, filing_id)
+          );
+          break;
+        
+        case 'incremental_check':
+          response = await Sentry.startSpan(
+            { name: 'incrementalFilingCheck', op: 'sec.check' },
+            async () => await incrementalFilingCheck(supabase, ticker, filing_type)
+          );
+          break;
+        
+        case 'setup_scheduled_jobs':
+          response = await Sentry.startSpan(
+            { name: 'setupScheduledJobs', op: 'sec.setup' },
+            async () => await setupScheduledJobs(supabase)
+          );
+          break;
+        
+        default:
+          throw new Error(`Unknown action: ${action}`);
       }
-    );
-  }
+
+      transaction.setStatus('ok');
+      transaction.setHttpStatus(response.status);
+      return response;
+
+    } catch (error) {
+      console.error('Error in SEC extractor:', error);
+      
+      // Capture error in Sentry with context
+      Sentry.captureException(error, {
+        contexts: {
+          request: {
+            url: req.url,
+            method: req.method,
+          }
+        }
+      });
+
+      transaction.setStatus('internal_error');
+      
+      return new Response(
+        JSON.stringify({ 
+          error: error.message,
+          timestamp: new Date().toISOString()
+        }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    } finally {
+      transaction.finish();
+    }
+  });
 });
 
 async function backfillAllBDCs(supabase: any) {
