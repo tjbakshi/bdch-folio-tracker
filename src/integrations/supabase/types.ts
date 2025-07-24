@@ -14,7 +14,220 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      bdc_universe: {
+        Row: {
+          cik: string | null
+          company_name: string
+          created_at: string
+          id: string
+          is_active: boolean
+          ticker: string
+          updated_at: string
+        }
+        Insert: {
+          cik?: string | null
+          company_name: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          ticker: string
+          updated_at?: string
+        }
+        Update: {
+          cik?: string | null
+          company_name?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          ticker?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      filings: {
+        Row: {
+          accession_number: string
+          cik: string
+          created_at: string
+          document_url: string | null
+          error_message: string | null
+          filing_date: string
+          filing_type: string
+          id: string
+          period_end_date: string | null
+          status: string
+          ticker: string
+          updated_at: string
+        }
+        Insert: {
+          accession_number: string
+          cik: string
+          created_at?: string
+          document_url?: string | null
+          error_message?: string | null
+          filing_date: string
+          filing_type: string
+          id?: string
+          period_end_date?: string | null
+          status?: string
+          ticker: string
+          updated_at?: string
+        }
+        Update: {
+          accession_number?: string
+          cik?: string
+          created_at?: string
+          document_url?: string | null
+          error_message?: string | null
+          filing_date?: string
+          filing_type?: string
+          id?: string
+          period_end_date?: string | null
+          status?: string
+          ticker?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      investments_computed: {
+        Row: {
+          created_at: string
+          filing_id: string
+          id: string
+          is_non_accrual: boolean
+          mark: number | null
+          quarter_year: string
+          raw_investment_id: string
+        }
+        Insert: {
+          created_at?: string
+          filing_id: string
+          id?: string
+          is_non_accrual?: boolean
+          mark?: number | null
+          quarter_year: string
+          raw_investment_id: string
+        }
+        Update: {
+          created_at?: string
+          filing_id?: string
+          id?: string
+          is_non_accrual?: boolean
+          mark?: number | null
+          quarter_year?: string
+          raw_investment_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "investments_computed_filing_id_fkey"
+            columns: ["filing_id"]
+            isOneToOne: false
+            referencedRelation: "filings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "investments_computed_raw_investment_id_fkey"
+            columns: ["raw_investment_id"]
+            isOneToOne: false
+            referencedRelation: "investments_raw"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      investments_raw: {
+        Row: {
+          acquisition_date: string | null
+          amortized_cost: number | null
+          business_description: string | null
+          company_name: string | null
+          coupon: string | null
+          created_at: string
+          fair_value: number | null
+          filing_id: string
+          id: string
+          investment_tranche: string | null
+          principal_amount: number | null
+          raw_row_data: Json | null
+          reference_rate: string | null
+          spread: string | null
+        }
+        Insert: {
+          acquisition_date?: string | null
+          amortized_cost?: number | null
+          business_description?: string | null
+          company_name?: string | null
+          coupon?: string | null
+          created_at?: string
+          fair_value?: number | null
+          filing_id: string
+          id?: string
+          investment_tranche?: string | null
+          principal_amount?: number | null
+          raw_row_data?: Json | null
+          reference_rate?: string | null
+          spread?: string | null
+        }
+        Update: {
+          acquisition_date?: string | null
+          amortized_cost?: number | null
+          business_description?: string | null
+          company_name?: string | null
+          coupon?: string | null
+          created_at?: string
+          fair_value?: number | null
+          filing_id?: string
+          id?: string
+          investment_tranche?: string | null
+          principal_amount?: number | null
+          raw_row_data?: Json | null
+          reference_rate?: string | null
+          spread?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "investments_raw_filing_id_fkey"
+            columns: ["filing_id"]
+            isOneToOne: false
+            referencedRelation: "filings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      processing_logs: {
+        Row: {
+          created_at: string
+          details: Json | null
+          filing_id: string | null
+          id: string
+          log_level: string
+          message: string
+        }
+        Insert: {
+          created_at?: string
+          details?: Json | null
+          filing_id?: string | null
+          id?: string
+          log_level: string
+          message: string
+        }
+        Update: {
+          created_at?: string
+          details?: Json | null
+          filing_id?: string | null
+          id?: string
+          log_level?: string
+          message?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "processing_logs_filing_id_fkey"
+            columns: ["filing_id"]
+            isOneToOne: false
+            referencedRelation: "filings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
