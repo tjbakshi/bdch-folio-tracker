@@ -74,21 +74,23 @@ test.describe('BDC Analytics Application', () => {
     await expect(backfillButton).toBeVisible();
     await expect(backfillButton).not.toBeDisabled();
     
-    // Trigger backfill process
-    await backfillButton.click();
+    // Robust click strategy for backfill button
+    await backfillButton.scrollIntoViewIfNeeded();
+    await backfillButton.click({ force: true });
     
-    // Wait for success toast using role to avoid strict mode violation
+    // Wait for success toast using accessible role
     await expect(
-      page.getByRole('status', { name: /started backfill for all BDCs/i })
+      page.getByRole('status', { name: /Started backfill for all BDCs/i })
     ).toBeVisible({ timeout: 10000 });
     
     // Verify at least one log entry appears in recent logs
     const logsSection = page.getByTestId('processing-logs');
     await expect(logsSection).toBeVisible();
     
-    // Check that there's at least one log entry
+    // Check that there's at least one log entry with explicit wait
+    await page.waitForSelector('[data-testid="log-entry"]', { timeout: 15000 });
     const logEntries = page.locator('[data-testid="log-entry"]');
-    await expect(logEntries.first()).toBeVisible({ timeout: 15000 });
+    await expect(logEntries.first()).toBeVisible();
   });
 
   test('Dashboard Data Display', async ({ page }) => {
