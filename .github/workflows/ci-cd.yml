@@ -47,6 +47,9 @@ jobs:
       run: |
         echo "Building front-end application..."
         npm run build
+        echo "Copying API documentation files..."
+        cp public/openapi.yaml dist/
+        cp public/docs.html dist/
       env:
         VITE_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
         VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}

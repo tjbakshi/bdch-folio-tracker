@@ -1,0 +1,482 @@
+openapi: 3.0.3
+info:
+  title: BDC Investment Analytics API
+  description: |
+    REST API for Business Development Company (BDC) investment data analysis.
+    Provides endpoints to search investments, analyze marks, export data, and manage cache.
+  version: 1.0.0
+  contact:
+    name: BDC Analytics Team
+    email: support@bdc-analytics.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: https://pkpvyqvcsmyxcudamerw.supabase.co/functions/v1/bdc-api
+    description: Production API
+
+paths:
+  /investments:
+    get:
+      summary: Search and filter investments
+      description: |
+        Retrieve paginated investment data with optional filtering by company, manager, 
+        tranche, description, and date range. Results are sorted by filing date (newest first).
+      parameters:
+        - $ref: '#/components/parameters/Manager'
+        - $ref: '#/components/parameters/Company'
+        - $ref: '#/components/parameters/Tranche'
+        - $ref: '#/components/parameters/Description'
+        - $ref: '#/components/parameters/DateFrom'
+        - $ref: '#/components/parameters/DateTo'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Successful response with investment data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvestmentSearchResponse'
+              example:
+                data:
+                  - id: "123e4567-e89b-12d3-a456-426614174000"
+                    company_name: "TechCorp LLC"
+                    business_description: "Software development services"
+                    investment_tranche: "First Lien"
+                    principal_amount: 5000000
+                    fair_value: 4750000
+                    filings:
+                      ticker: "ARCC"
+                      filing_date: "2024-03-15"
+                      filing_type: "10-Q"
+                    investments_computed:
+                      - mark: 0.95
+                        is_non_accrual: false
+                        quarter_year: "Q1 2024"
+                pagination:
+                  page: 1
+                  limit: 50
+                  total: 1247
+                  totalPages: 25
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /marks/{raw_id}:
+    get:
+      summary: Get mark history for investment
+      description: Retrieve time-series data showing how an investment's mark has changed over time across different quarters.
+      parameters:
+        - name: raw_id
+          in: path
+          required: true
+          description: Unique identifier for the raw investment record
+          schema:
+            type: string
+            format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+      responses:
+        '200':
+          description: Mark history data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarkHistoryResponse'
+              example:
+                raw_investment_id: "123e4567-e89b-12d3-a456-426614174000"
+                history:
+                  - quarter_year: "Q1 2024"
+                    mark: 0.98
+                    created_at: "2024-03-31T23:59:59Z"
+                  - quarter_year: "Q2 2024"
+                    mark: 0.95
+                    created_at: "2024-06-30T23:59:59Z"
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /nonaccruals:
+    get:
+      summary: List non-accrual investments
+      description: Retrieve investments that are currently in non-accrual status, with optional filtering by quarter, year, and manager.
+      parameters:
+        - name: quarter
+          in: query
+          description: Filter by quarter (1-4)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 4
+          example: 3
+        - name: year
+          in: query
+          description: Filter by year
+          schema:
+            type: integer
+            minimum: 2020
+          example: 2024
+        - $ref: '#/components/parameters/Manager'
+      responses:
+        '200':
+          description: Non-accrual investments
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NonAccrualResponse'
+              example:
+                data:
+                  - mark: 0.45
+                    is_non_accrual: true
+                    quarter_year: "Q3 2024"
+                    investments_raw:
+                      company_name: "Distressed Corp"
+                      business_description: "Manufacturing"
+                      investment_tranche: "Second Lien"
+                      principal_amount: 2000000
+                      fair_value: 900000
+                      filings:
+                        ticker: "BXSL"
+                        filing_date: "2024-09-30"
+                        filing_type: "10-Q"
+                count: 23
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /export:
+    post:
+      summary: Export investment data
+      description: Generate and download a CSV file containing filtered investment data based on the provided criteria.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExportRequest'
+            example:
+              company: "Tech"
+              manager: "ARCC"
+              tranche: "First Lien"
+              date_from: "2024-01-01"
+              date_to: "2024-12-31"
+      responses:
+        '200':
+          description: CSV file download
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+              example: |
+                "Company Name","Manager","Filing Date","Investment Tranche","Principal Amount","Fair Value","Mark"
+                "TechCorp LLC","ARCC","2024-03-15","First Lien","5000000","4750000","0.95"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /cache/invalidate:
+    post:
+      summary: Invalidate API cache
+      description: Clear any cached data to ensure fresh results are returned from subsequent API calls.
+      responses:
+        '200':
+          description: Cache invalidated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Cache invalidated successfully"
+                  timestamp:
+                    type: string
+                    format: date-time
+                    example: "2024-03-15T10:30:00Z"
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+components:
+  parameters:
+    Manager:
+      name: manager
+      in: query
+      description: Filter by BDC manager ticker symbol
+      schema:
+        type: string
+      example: "ARCC"
+    
+    Company:
+      name: company
+      in: query
+      description: Filter by company name (partial match)
+      schema:
+        type: string
+      example: "TechCorp"
+    
+    Tranche:
+      name: tranche
+      in: query
+      description: Filter by investment tranche type
+      schema:
+        type: string
+        enum: ["First Lien", "Second Lien", "Equity", "Subordinated"]
+      example: "First Lien"
+    
+    Description:
+      name: description
+      in: query
+      description: Filter by business description (partial match)
+      schema:
+        type: string
+      example: "Software"
+    
+    DateFrom:
+      name: date_from
+      in: query
+      description: Filter investments filed on or after this date
+      schema:
+        type: string
+        format: date
+      example: "2024-01-01"
+    
+    DateTo:
+      name: date_to
+      in: query
+      description: Filter investments filed on or before this date
+      schema:
+        type: string
+        format: date
+      example: "2024-12-31"
+    
+    Page:
+      name: page
+      in: query
+      description: Page number for pagination (starts at 1)
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+      example: 1
+    
+    Limit:
+      name: limit
+      in: query
+      description: Number of items per page (max 1000)
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 1000
+        default: 50
+      example: 50
+
+  schemas:
+    Investment:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique identifier for the investment
+        company_name:
+          type: string
+          description: Name of the portfolio company
+          example: "TechCorp LLC"
+        business_description:
+          type: string
+          description: Description of the company's business
+          example: "Software development services"
+        investment_tranche:
+          type: string
+          description: Type of investment tranche
+          example: "First Lien"
+        principal_amount:
+          type: number
+          description: Principal amount invested (in USD)
+          example: 5000000
+        fair_value:
+          type: number
+          description: Current fair value of investment (in USD)
+          example: 4750000
+        filings:
+          $ref: '#/components/schemas/Filing'
+        investments_computed:
+          type: array
+          items:
+            $ref: '#/components/schemas/ComputedData'
+
+    Filing:
+      type: object
+      properties:
+        ticker:
+          type: string
+          description: BDC manager ticker symbol
+          example: "ARCC"
+        filing_date:
+          type: string
+          format: date
+          description: Date the SEC filing was submitted
+          example: "2024-03-15"
+        filing_type:
+          type: string
+          enum: ["10-K", "10-Q"]
+          description: Type of SEC filing
+          example: "10-Q"
+
+    ComputedData:
+      type: object
+      properties:
+        mark:
+          type: number
+          description: Investment mark (fair value / principal amount)
+          minimum: 0
+          example: 0.95
+        is_non_accrual:
+          type: boolean
+          description: Whether the investment is in non-accrual status
+          example: false
+        quarter_year:
+          type: string
+          description: Quarter and year of the filing
+          pattern: "^Q[1-4] \\d{4}$"
+          example: "Q1 2024"
+
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+          description: Current page number
+          example: 1
+        limit:
+          type: integer
+          description: Items per page
+          example: 50
+        total:
+          type: integer
+          description: Total number of items
+          example: 1247
+        totalPages:
+          type: integer
+          description: Total number of pages
+          example: 25
+
+    MarkHistory:
+      type: object
+      properties:
+        quarter_year:
+          type: string
+          example: "Q1 2024"
+        mark:
+          type: number
+          example: 0.95
+        created_at:
+          type: string
+          format: date-time
+          example: "2024-03-31T23:59:59Z"
+
+    ExportRequest:
+      type: object
+      properties:
+        company:
+          type: string
+          description: Filter by company name
+          example: "Tech"
+        manager:
+          type: string
+          description: Filter by manager ticker
+          example: "ARCC"
+        tranche:
+          type: string
+          description: Filter by investment tranche
+          example: "First Lien"
+        description:
+          type: string
+          description: Filter by business description
+          example: "Software"
+        date_from:
+          type: string
+          format: date
+          description: Start date filter
+          example: "2024-01-01"
+        date_to:
+          type: string
+          format: date
+          description: End date filter
+          example: "2024-12-31"
+
+    InvestmentSearchResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Investment'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    MarkHistoryResponse:
+      type: object
+      properties:
+        raw_investment_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/MarkHistory'
+
+    NonAccrualResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ComputedData'
+        count:
+          type: integer
+          description: Number of non-accrual investments
+          example: 23
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Error message
+          example: "Invalid request parameters"
+
+  responses:
+    BadRequest:
+      description: Bad request - invalid parameters
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "Invalid date format. Use YYYY-MM-DD."
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "Investment not found"
+
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "Internal server error"
