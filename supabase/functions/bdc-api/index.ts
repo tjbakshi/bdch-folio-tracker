@@ -48,7 +48,7 @@ serve(async (req) => {
     let response: Response;
 
     // Route requests with individual Sentry spans
-    if (req.method === 'GET' && path === '/investments') {
+    if ((req.method === 'GET' || req.method === 'POST') && path === '/investments') {
       response = await Sentry.startSpan(
         { name: 'searchInvestments', op: 'db.query' },
         async () => await searchInvestments(supabase, url.searchParams)
