@@ -1,17 +1,32 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-// Note: Sentry for Deno edge functions is optional - remove import if causing deployment issues
-// import * as Sentry from 'https://deno.land/x/sentry@7.81.1/index.ts';
+import * as Sentry from 'https://esm.sh/@sentry/serverless-deno@8.0.0';
 
-// Simplified logging instead of Sentry for now
-const logError = (error: any, context?: any) => {
-  console.error('BDC API Error:', error, context ? { context } : '');
-};
-
-const logInfo = (message: string, context?: any) => {
-  console.log('BDC API:', message, context ? { context } : '');
-};
+// Initialize Sentry for Edge Function monitoring
+const sentryDsn = Deno.env.get('SENTRY_DSN_EDGE');
+if (sentryDsn && !sentryDsn.includes('your-sentry-dsn')) {
+  Sentry.init({
+    dsn: sentryDsn,
+    environment: Deno.env.get('ENVIRONMENT') || 'production',
+    tracesSampleRate: 1.0,
+    beforeSend(event) {
+      // Add function context
+      event.contexts = {
+        ...event.contexts,
+        runtime: {
+          name: 'deno',
+          version: Deno.version.deno,
+        },
+        function: {
+          name: 'bdc-api',
+          type: 'supabase-edge-function',
+        }
+      };
+      return event;
+    }
+  });
+}
 
 // CORS headers
 const corsHeaders = {
@@ -29,62 +44,103 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  const startTime = Date.now();
+  // Start Sentry transaction for the entire request
+  return await Sentry.withSentry(async () => {
+    const transaction = Sentry.startTransaction({
+      name: `BDC API ${req.method} ${new URL(req.url).pathname}`,
+      op: 'http.server',
+      tags: {
+        'http.method': req.method,
+        'function.name': 'bdc-api',
+      }
+    });
 
-  try {
-    const url = new URL(req.url);
-    const path = url.pathname.replace('/functions/v1/bdc-api', '');
-    
-    logInfo(`${req.method} ${path}`, { userAgent: req.headers.get('user-agent') });
-    
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    );
+    try {
+      const url = new URL(req.url);
+      const path = url.pathname.replace('/functions/v1/bdc-api', '');
+      
+      // Add request context to Sentry
+      Sentry.setContext('request', {
+        url: req.url,
+        method: req.method,
+        path,
+        userAgent: req.headers.get('user-agent'),
+      });
+      
+      const supabase = createClient(
+        Deno.env.get('SUPABASE_URL') ?? '',
+        Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+      );
 
-    let response: Response;
+      let response: Response;
 
-    // Route requests based on path and method
-    if (req.method === 'GET' && path === '/investments') {
-      response = await searchInvestments(supabase, url.searchParams);
-    } else if (req.method === 'GET' && path.startsWith('/marks/')) {
-      const rawId = path.split('/')[2];
-      response = await getMarkHistory(supabase, rawId);
-    } else if (req.method === 'GET' && path === '/nonaccruals') {
-      response = await listNonAccruals(supabase, url.searchParams);
-    } else if (req.method === 'POST' && path === '/export') {
-      const body = await req.json();
-      response = await exportToExcel(supabase, body);
-    } else if (req.method === 'POST' && path === '/cache/invalidate') {
-      response = await invalidateCache();
-    } else {
-      response = new Response(JSON.stringify({ error: 'Not found' }), {
-        status: 404,
+      // Route requests with individual Sentry spans
+      if (req.method === 'GET' && path === '/investments') {
+        response = await Sentry.startSpan(
+          { name: 'searchInvestments', op: 'db.query' },
+          async () => await searchInvestments(supabase, url.searchParams)
+        );
+      } else if (req.method === 'GET' && path.startsWith('/marks/')) {
+        const rawId = path.split('/')[2];
+        Sentry.setTag('investment.rawId', rawId);
+        response = await Sentry.startSpan(
+          { name: 'getMarkHistory', op: 'db.query' },
+          async () => await getMarkHistory(supabase, rawId)
+        );
+      } else if (req.method === 'GET' && path === '/nonaccruals') {
+        response = await Sentry.startSpan(
+          { name: 'listNonAccruals', op: 'db.query' },
+          async () => await listNonAccruals(supabase, url.searchParams)
+        );
+      } else if (req.method === 'POST' && path === '/export') {
+        const body = await req.json();
+        Sentry.setContext('export', { filters: body });
+        response = await Sentry.startSpan(
+          { name: 'exportToExcel', op: 'db.query' },
+          async () => await exportToExcel(supabase, body)
+        );
+      } else if (req.method === 'POST' && path === '/cache/invalidate') {
+        response = await Sentry.startSpan(
+          { name: 'invalidateCache', op: 'cache.clear' },
+          async () => await invalidateCache()
+        );
+      } else {
+        response = new Response(JSON.stringify({ error: 'Not found' }), {
+          status: 404,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      transaction.setStatus('ok');
+      transaction.setHttpStatus(response.status);
+      return response;
+
+    } catch (error) {
+      console.error('Error in bdc-api:', error);
+      
+      // Capture error in Sentry with context
+      Sentry.captureException(error, {
+        contexts: {
+          request: {
+            url: req.url,
+            method: req.method,
+          }
+        }
+      });
+
+      transaction.setStatus('internal_error');
+      
+      return new Response(JSON.stringify({ 
+        error: error.message,
+        timestamp: new Date().toISOString()
+      }), {
+        status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
+    } finally {
+      transaction.finish();
     }
-
-    const duration = Date.now() - startTime;
-    logInfo(`${req.method} ${path} completed`, { status: response.status, duration });
-    
-    return response;
-
-  } catch (error) {
-    const duration = Date.now() - startTime;
-    logError(error, { 
-      method: req.method, 
-      url: req.url,
-      duration 
-    });
-    
-    return new Response(JSON.stringify({ 
-      error: error.message,
-      timestamp: new Date().toISOString()
-    }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
-  }
+  });
 });
 
 /**
