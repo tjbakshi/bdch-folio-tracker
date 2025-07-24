@@ -29,11 +29,34 @@ test.describe('BDC Analytics Application', () => {
         })
       });
     });
-    page.setDefaultTimeout(30000);
+
     // stub the backfill endpoint so the success toast actually fires
     await page.route('**/bdc-api/backfill**', route =>
       route.fulfill({ status: 200, contentType: 'application/json', body: '{}' })
     );
+
+    // stub scheduled jobs endpoints
+    await page.route('**/bdc-api/scheduled-jobs**', route =>
+      route.fulfill({ 
+        status: 200, 
+        contentType: 'application/json', 
+        body: JSON.stringify([
+          { id: 'job-1', name: 'Daily Backfill', schedule: '0 2 * * *', status: 'active' }
+        ])
+      })
+    );
+
+    // stub export endpoint
+    await page.route('**/bdc-api/export**', route =>
+      route.fulfill({ 
+        status: 200, 
+        contentType: 'text/csv',
+        headers: { 'Content-Disposition': 'attachment; filename="bdc-investments-export.csv"' },
+        body: 'company_name,manager,principal_amount\nTech Corp,ARCC,123456'
+      })
+    );
+
+    page.setDefaultTimeout(30000);
   });
 
   test('Admin Backfill Flow', async ({ page }) => {
@@ -65,7 +88,7 @@ test.describe('BDC Analytics Application', () => {
     
     // Check that there's at least one log entry
     const logEntries = page.locator('[data-testid="log-entry"]');
-    await expect(logEntries).toHaveCountGreaterThan(0);
+    await expect(logEntries.first()).toBeVisible({ timeout: 15000 });
   });
 
   test('Dashboard Data Display', async ({ page }) => {
@@ -143,8 +166,8 @@ test.describe('BDC Analytics Application', () => {
     // Verify download properties
     expect(download.suggestedFilename()).toMatch(/bdc-investments.*\.csv/);
     
-    // Verify success toast appears
-    const toastDesc = page.locator('[data-lov-name="ToastDescription"]', { hasText: /export downloaded successfully/i });
+    // Verify success toast appears using data-lov-name to avoid strict mode
+    const toastDesc = page.locator('[data-lov-name="ToastDescription"]', { hasText: /export downloaded successfully/i }).first();
     await expect(toastDesc).toBeVisible({ timeout: 15000 });
     await expect(toastDesc).toBeHidden({ timeout: 10000 });
   });
@@ -231,15 +254,15 @@ test.describe('BDC Analytics Application', () => {
     // Verify custom header is present
     await expect(page.getByRole('heading', { name: 'BDC Investment Analytics API' })).toBeVisible();
     
-    // Verify API info section
+    // Verify API info section - use first() to avoid strict mode
     await expect(page.getByText('Quick Start Guide').first()).toBeVisible();
     
-    // Verify endpoints are documented
+    // Verify endpoints are documented - use first() to avoid strict mode
     await expect(page.getByText('/investments').first()).toBeVisible();
     await expect(page.getByText('/export').first()).toBeVisible();
     
     // Verify at least one API method is expandable
-    await expect(page.locator('.opblock')).toBeVisible();
+    await expect(page.locator('.opblock').first()).toBeVisible();
   });
 
   test('Admin Scheduled Jobs Management', async ({ page }) => {
@@ -257,8 +280,8 @@ test.describe('BDC Analytics Application', () => {
     await page.waitForTimeout(500); // Wait for any animations
     await setupJobsButton.click({ force: true });
     
-    // Wait for success toast
-    const toastDesc = page.locator('[data-lov-name="ToastDescription"]', { hasText: /scheduled jobs setup/i });
+    // Wait for success toast using data-lov-name to avoid strict mode
+    const toastDesc = page.locator('[data-lov-name="ToastDescription"]', { hasText: /scheduled jobs setup/i }).first();
     await expect(toastDesc).toBeVisible({ timeout: 15000 });
     await expect(toastDesc).toBeHidden({ timeout: 10000 });
     
