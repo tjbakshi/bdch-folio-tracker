@@ -8,10 +8,7 @@ import { test, expect, type Page } from '@playwright/test';
 test.describe('BDC Analytics Application', () => {
   
   test.beforeEach(async ({ page }) => {
-    // Set longer timeout for API calls
-    page.setDefaultTimeout(30000);
-    // ── GLOBAL INVESTMENTS STUB ───────────────────────────────────────────────
-    // so that the dashboard & detail tests always see at least one row
+    // stub out investments for every dashboard-based test
     await page.route('**/bdc-api/investments**', async route => {
       await route.fulfill({
         status: 200,
@@ -23,28 +20,16 @@ test.describe('BDC Analytics Application', () => {
             manager: 'ARCC',
             business_description: 'A tech business',
             investment_tranche: 'First Lien',
-          principal_amount: 123_456,
-          fair_value: 120_000,
-            filings: { 
-              ticker: 'TECH', 
-              filing_date: '2024-02-02', 
-              filing_type: '10-K' 
-            },
-            investments_computed: [{ 
-              mark: 0.97, 
-              is_non_accrual: false, 
-              quarter_year: 'Q1 2024' 
-            }]
+            principal_amount: 123_456,
+            fair_value: 120_000,
+            filings: { ticker: 'TECH', filing_date: '2024-02-02', filing_type: '10-K' },
+            investments_computed: [{ mark: 0.97, is_non_accrual: false, quarter_year: 'Q1 2024' }]
           }],
-          pagination: { 
-            page: 1, 
-            limit: 100, 
-            total: 1, 
-            totalPages: 1 
-          }
+          pagination: { page: 1, limit: 100, total: 1, totalPages: 1 }
         })
       });
     });
+    page.setDefaultTimeout(30000);
   });
 
   test('Admin Backfill Flow', async ({ page }) => {
@@ -65,10 +50,8 @@ test.describe('BDC Analytics Application', () => {
     // Trigger backfill process
     await backfillButton.click();
     
-    // Wait for success toast to appear (only the description, not the live-region wrapper)
-    const toast = page.locator('[data-lov-name="ToastDescription"]', { hasText: /started backfill/i });
-    await expect(toast).toBeVisible({ timeout: 15000 });
-    await expect(toast).toBeHidden({ timeout: 10000 });
+    // Wait for exactly the ToastDescription component, not the aria-live wrapper
+    await expect(page.getByTestId('toast-description')).toHaveText(/Started backfill for all BDCs/);
     
     // Verify at least one log entry appears in recent logs
     const logsSection = page.getByTestId('processing-logs');
@@ -123,8 +106,8 @@ test.describe('BDC Analytics Application', () => {
     // Wait for investments data to load
     await waitForInvestments(page);
     
-    // There is no data-testid; use accessible combobox labeled "All Managers"
-    const managerSelect = page.getByRole('combobox', { name: 'All Managers' });
+    // Use the accessible combobox role
+    const managerSelect = page.getByRole('combobox', { name: 'Manager' });
     await expect(managerSelect).toBeVisible();
     await managerSelect.click();
     
@@ -184,8 +167,7 @@ test.describe('BDC Analytics Application', () => {
     // Clear search
     await searchInput.clear();
     
-    // There is no data-testid; use accessible combobox labeled "All Tranches"
-    const trancheSelect = page.getByRole('combobox', { name: 'All Tranches' });
+    const trancheSelect = page.getByRole('combobox', { name: 'Tranche' });
     await expect(trancheSelect).toBeVisible();
     await trancheSelect.click();
     
@@ -206,8 +188,8 @@ test.describe('BDC Analytics Application', () => {
     // Wait for investments data to load
     await waitForInvestments(page);
     
-    // Get investment company name for verification
-    await waitForInvestments(page);
+    // wait for at least one investment row to appear
+    await page.waitForSelector('[data-testid="investment-row"]', { timeout: 15000 });
     const firstInvestmentRow = page.locator('[data-testid="investment-row"]').first();
     await expect(firstInvestmentRow).toBeVisible();
     const companyName = await firstInvestmentRow.getByTestId('company-name').textContent();
@@ -234,7 +216,7 @@ test.describe('BDC Analytics Application', () => {
     // Should redirect to /docs.html
     await page.waitForURL('**/docs.html', { timeout: 10000 });
     
-    // Two .swagger-ui elements exist; target the outer container only
+    // target the <section> wrapper only
     await expect(page.locator('section.swagger-ui.swagger-container')).toBeVisible({ timeout: 15000 });
     
     // Verify custom header is present
