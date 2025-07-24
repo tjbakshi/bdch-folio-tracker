@@ -46,6 +46,49 @@ test.describe('BDC Analytics Application', () => {
   });
 
   test('Dashboard Data Display', async ({ page }) => {
+    // Set up network interception for POST /investments
+    await page.route('**/bdc-api/investments**', async route => {
+      if (route.request().method() === 'POST') {
+        console.log('✅ Intercepted POST request to /bdc-api/investments');
+        // Mock successful response
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: [
+              {
+                id: "test-123",
+                company_name: "Test Corp",
+                business_description: "Test business",
+                investment_tranche: "First Lien",
+                principal_amount: 1000000,
+                fair_value: 950000,
+                filings: {
+                  ticker: "TEST",
+                  filing_date: "2024-01-01",
+                  filing_type: "10-Q"
+                },
+                investments_computed: [{
+                  mark: 0.95,
+                  is_non_accrual: false,
+                  quarter_year: "Q1 2024"
+                }]
+              }
+            ],
+            pagination: {
+              page: 1,
+              limit: 100,
+              total: 1,
+              totalPages: 1
+            }
+          })
+        });
+      } else {
+        // Continue with actual request for other methods
+        await route.continue();
+      }
+    });
+
     // Navigate to dashboard
     await page.goto('/');
     
@@ -293,6 +336,145 @@ test.describe('BDC Analytics Application', () => {
     // Reset to desktop
     await page.setViewportSize({ width: 1280, height: 720 });
   });
+  
+  test('Dashboard POST-Only Functionality', async ({ page }) => {
+    // Block all GET requests to /investments and ensure dashboard still works via POST
+    await page.route('**/bdc-api/investments**', async route => {
+      const method = route.request().method();
+      
+      if (method === 'GET') {
+        console.log('❌ Blocking GET request to /bdc-api/investments');
+        // Block GET requests with 405 Method Not Allowed
+        await route.fulfill({
+          status: 405,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: 'GET method not allowed in this test' })
+        });
+      } else if (method === 'POST') {
+        console.log('✅ Allowing POST request to /bdc-api/investments');
+        // Mock successful POST response with test data
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: [
+              {
+                id: "post-test-123",
+                company_name: "POST Test Corp",
+                business_description: "POST-only test business",
+                investment_tranche: "First Lien",
+                principal_amount: 2000000,
+                fair_value: 1900000,
+                filings: {
+                  ticker: "POST",
+                  filing_date: "2024-01-15",
+                  filing_type: "10-K"
+                },
+                investments_computed: [{
+                  mark: 0.95,
+                  is_non_accrual: false,
+                  quarter_year: "Q1 2024"
+                }]
+              }
+            ],
+            pagination: {
+              page: 1,
+              limit: 100,
+              total: 1,
+              totalPages: 1
+            }
+          })
+        });
+      } else {
+        // Allow other methods to continue
+        await route.continue();
+      }
+    });
+
+    // Navigate to dashboard
+    await page.goto('/');
+    
+    // Wait for loading to complete - should work via POST only
+    await expect(page.getByText('Loading dashboard data...')).toBeHidden({ timeout: 15000 });
+    
+    // Verify dashboard loads successfully with POST-only data
+    await expect(page.getByRole('heading', { name: 'BDC Investment Dashboard' })).toBeVisible();
+    
+    // Verify the test data appears (confirming POST was used)
+    const holdingsTable = page.getByTestId('holdings-table');
+    await expect(holdingsTable).toBeVisible();
+    
+    // Check that our POST-specific test data is displayed
+    await expect(page.getByText('POST Test Corp')).toBeVisible();
+    await expect(page.getByText('POST-only test business')).toBeVisible();
+    
+    // Verify summary cards are populated
+    const totalAssetsCard = page.getByTestId('total-assets-card');
+    await expect(totalAssetsCard).toBeVisible();
+    
+    // Test that filtering still works with POST
+    const managerSelect = page.getByTestId('manager-filter');
+    await expect(managerSelect).toBeVisible();
+    await managerSelect.click();
+    
+    // Select "All Managers" to trigger a new POST request
+    const allManagersOption = page.getByRole('option', { name: 'All Managers' });
+    if (await allManagersOption.isVisible()) {
+      await allManagersOption.click();
+      // Wait for filter to apply via POST
+      await page.waitForTimeout(1000);
+    }
+    
+    console.log('✅ Dashboard successfully loaded using POST-only requests');
+  });
+  
+  test('Network Error Handling for Investments API', async ({ page }) => {
+    // Test dashboard behavior when investments API returns various errors
+    let requestCount = 0;
+    
+    await page.route('**/bdc-api/investments**', async route => {
+      requestCount++;
+      
+      if (requestCount === 1) {
+        // First request: 404 error
+        await route.fulfill({
+          status: 404,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: 'Not found' })
+        });
+      } else if (requestCount === 2) {
+        // Second request: 500 error  
+        await route.fulfill({
+          status: 500,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: 'Internal server error' })
+        });
+      } else {
+        // Subsequent requests: success
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: [],
+            pagination: { page: 1, limit: 100, total: 0, totalPages: 0 }
+          })
+        });
+      }
+    });
+
+    // Navigate to dashboard
+    await page.goto('/');
+    
+    // Should eventually show dashboard even after errors
+    await expect(page.getByRole('heading', { name: 'BDC Investment Dashboard' })).toBeVisible({ timeout: 20000 });
+    
+    // Check that error states are handled gracefully
+    const holdingsTable = page.getByTestId('holdings-table');
+    await expect(holdingsTable).toBeVisible();
+    
+    console.log(`✅ Handled ${requestCount} API requests including errors`);
+  });
+
 });
 
 /**

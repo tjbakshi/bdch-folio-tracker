@@ -64,11 +64,16 @@ class SmokeTest {
         hasResponse,
       };
 
-      if (!hasResponse) {
+      if (!hasResponse || response.status === 404) {
         const errorText = await response.text();
         result.error = errorText;
         console.log(`❌ ${endpoint}: ${response.status} ${response.statusText}`);
         console.log(`   Error: ${errorText}`);
+        
+        // Special handling for 404 errors on investments endpoint
+        if (response.status === 404 && endpoint.includes('investments')) {
+          console.log(`⚠️  WARNING: 404 on investments endpoint may indicate routing issue`);
+        }
       } else {
         console.log(`✅ ${endpoint}: ${response.status} (${responseTime}ms)`);
       }
@@ -92,8 +97,11 @@ class SmokeTest {
   async testBdcApi(): Promise<void> {
     console.log('\n📊 Testing BDC API endpoints...\n');
 
-    // Test investments endpoint with both GET and POST
+    // Test investments endpoint with both GET and POST methods
+    console.log('🔄 Testing investments endpoint with GET method...');
     this.results.push(await this.testEndpoint('bdc-api/investments?limit=5', 'GET'));
+    
+    console.log('🔄 Testing investments endpoint with POST method...');
     this.results.push(await this.testEndpoint('bdc-api/investments?limit=5', 'POST'));
     
     // Test other endpoints
