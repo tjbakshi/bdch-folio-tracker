@@ -92,8 +92,11 @@ class SmokeTest {
   async testBdcApi(): Promise<void> {
     console.log('\n📊 Testing BDC API endpoints...\n');
 
-    // Test basic endpoints
-    this.results.push(await this.testEndpoint('bdc-api/investments?limit=5'));
+    // Test investments endpoint with both GET and POST
+    this.results.push(await this.testEndpoint('bdc-api/investments?limit=5', 'GET'));
+    this.results.push(await this.testEndpoint('bdc-api/investments?limit=5', 'POST'));
+    
+    // Test other endpoints
     this.results.push(await this.testEndpoint('bdc-api/nonaccruals?limit=5'));
     
     // Test cache invalidation

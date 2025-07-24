@@ -12,6 +12,10 @@ import type {
 /**
  * Search and filter investments with pagination
  * 
+ * Note: This function uses POST method internally via Supabase Edge Functions,
+ * even though it performs a data retrieval operation. Supabase function invocation
+ * always uses POST requests regardless of the operation type.
+ * 
  * @param params - Search and filter parameters
  * @returns Promise with investment data and pagination info
  * 

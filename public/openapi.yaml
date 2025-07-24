@@ -64,6 +64,55 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '500':
           $ref: '#/components/responses/InternalError'
+    
+    post:
+      summary: Search and filter investments (Alternative method)
+      description: |
+        Alternative endpoint to retrieve paginated investment data using POST method.
+        Accepts the same query parameters as GET method, but via query string.
+        This method is useful when using Supabase Edge Functions which internally use POST.
+        Results are sorted by filing date (newest first).
+      parameters:
+        - $ref: '#/components/parameters/Manager'
+        - $ref: '#/components/parameters/Company'
+        - $ref: '#/components/parameters/Tranche'
+        - $ref: '#/components/parameters/Description'
+        - $ref: '#/components/parameters/DateFrom'
+        - $ref: '#/components/parameters/DateTo'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Successful response with investment data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvestmentSearchResponse'
+              example:
+                data:
+                  - id: "123e4567-e89b-12d3-a456-426614174000"
+                    company_name: "TechCorp LLC"
+                    business_description: "Software development services"
+                    investment_tranche: "First Lien"
+                    principal_amount: 5000000
+                    fair_value: 4750000
+                    filings:
+                      ticker: "ARCC"
+                      filing_date: "2024-03-15"
+                      filing_type: "10-Q"
+                    investments_computed:
+                      - mark: 0.95
+                        is_non_accrual: false
+                        quarter_year: "Q1 2024"
+                pagination:
+                  page: 1
+                  limit: 50
+                  total: 1247
+                  totalPages: 25
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /marks/{raw_id}:
     get:

@@ -194,7 +194,7 @@ npm run test:e2e
 
 ### BDC API (`/functions/v1/bdc-api`)
 
-- `GET /investments` - Search and filter investment data
+- `GET|POST /investments` - Search and filter investment data (supports both GET and POST methods)
 - `GET /marks/{raw_id}` - Get mark history for specific investment
 - `GET /nonaccruals` - List investments in non-accrual status
 - `POST /export` - Export filtered data as CSV
