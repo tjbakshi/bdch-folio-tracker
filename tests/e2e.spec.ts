@@ -23,8 +23,8 @@ test.describe('BDC Analytics Application', () => {
             manager: 'ARCC',
             business_description: 'A tech business',
             investment_tranche: 'First Lien',
-            principal_amount: 1234567,
-            fair_value: 1200000,
+          principal_amount: 123_456,
+          fair_value: 120_000,
             filings: { 
               ticker: 'TECH', 
               filing_date: '2024-02-02', 
