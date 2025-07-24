@@ -1,0 +1,170 @@
+{
+  "info": {
+    "name": "BDC Analytics Smoke Test",
+    "description": "End-to-end testing for BDC Analytics Edge Functions with Sentry monitoring",
+    "version": "1.0.0"
+  },
+  "item": [
+    {
+      "name": "BDC API Tests",
+      "item": [
+        {
+          "name": "Get Investments",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{SUPABASE_ANON_KEY}}"
+              }
+            ],
+            "url": {
+              "raw": "{{SUPABASE_URL}}/functions/v1/bdc-api/investments?limit=5",
+              "host": ["{{SUPABASE_URL}}"],
+              "path": ["functions", "v1", "bdc-api", "investments"],
+              "query": [{"key": "limit", "value": "5"}]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response has data structure', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Non-Accruals",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{SUPABASE_ANON_KEY}}"
+              }
+            ],
+            "url": {
+              "raw": "{{SUPABASE_URL}}/functions/v1/bdc-api/nonaccruals?limit=5",
+              "host": ["{{SUPABASE_URL}}"],
+              "path": ["functions", "v1", "bdc-api", "nonaccruals"],
+              "query": [{"key": "limit", "value": "5"}]
+            }
+          }
+        },
+        {
+          "name": "Cache Invalidate",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{SUPABASE_ANON_KEY}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{SUPABASE_URL}}/functions/v1/bdc-api/cache/invalidate",
+              "host": ["{{SUPABASE_URL}}"],
+              "path": ["functions", "v1", "bdc-api", "cache", "invalidate"]
+            }
+          }
+        },
+        {
+          "name": "Export Data",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{SUPABASE_ANON_KEY}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"manager\": \"ARCC\",\n  \"limit\": 10\n}"
+            },
+            "url": {
+              "raw": "{{SUPABASE_URL}}/functions/v1/bdc-api/export",
+              "host": ["{{SUPABASE_URL}}"],
+              "path": ["functions", "v1", "bdc-api", "export"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "SEC Extractor Tests",
+      "item": [
+        {
+          "name": "Incremental Check",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{SUPABASE_ANON_KEY}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"incremental_check\",\n  \"ticker\": \"ARCC\",\n  \"filing_type\": \"10-Q\"\n}"
+            },
+            "url": {
+              "raw": "{{SUPABASE_URL}}/functions/v1/sec-extractor",
+              "host": ["{{SUPABASE_URL}}"],
+              "path": ["functions", "v1", "sec-extractor"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200 or 202', function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 202]);",
+                  "});",
+                  "",
+                  "// Log response for debugging",
+                  "console.log('SEC Extractor Response:', pm.response.text());"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "SUPABASE_URL",
+      "value": "https://pkpvyqvcsmyxcudamerw.supabase.co",
+      "type": "string"
+    },
+    {
+      "key": "SUPABASE_ANON_KEY",
+      "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBrcHZ5cXZjc215eGN1ZGFtZXJ3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTMzMjMxMTgsImV4cCI6MjA2ODg5OTExOH0.XHyg3AzXz70Ad1t-E7oiiw0wFhCxUfG1H41HitZgKQY",
+      "type": "string"
+    }
+  ]
+}

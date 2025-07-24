@@ -97,6 +97,14 @@ jobs:
       env:
         SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
 
+    - name: Run Edge Function Smoke Tests
+      run: |
+        echo "Running smoke tests for Edge Functions..."
+        deno run --allow-net --allow-env tests/quick-test.ts
+      env:
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+
     - name: Deploy to Vercel
       if: github.ref == 'refs/heads/main' && github.event_name == 'push'
       uses: amondnet/vercel-action@v25
