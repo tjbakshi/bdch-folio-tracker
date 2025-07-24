@@ -271,8 +271,8 @@ export default function BDCDashboard() {
               </div>
             </div>
             <div className="w-full md:w-48">
-              <Select value={selectedManager} onValueChange={setSelectedManager} data-testid="manager-filter">
-                <SelectTrigger>
+              <Select value={selectedManager} onValueChange={setSelectedManager}>
+                <SelectTrigger data-testid="manager-filter">
                   <SelectValue placeholder="Select Manager" />
                 </SelectTrigger>
                 <SelectContent>
@@ -286,8 +286,8 @@ export default function BDCDashboard() {
               </Select>
             </div>
             <div className="w-full md:w-48">
-              <Select value={selectedTranche} onValueChange={setSelectedTranche} data-testid="tranche-filter">
-                <SelectTrigger>
+              <Select value={selectedTranche} onValueChange={setSelectedTranche}>
+                <SelectTrigger data-testid="tranche-filter">
                   <SelectValue placeholder="Select Tranche" />
                 </SelectTrigger>
                 <SelectContent>
