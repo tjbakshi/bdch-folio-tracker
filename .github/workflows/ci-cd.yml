@@ -137,6 +137,74 @@ jobs:
           exit 1
         fi
 
+    - name: Notify smoke test results to Slack
+      if: always()
+      uses: 8398a7/action-slack@v3
+      with:
+        status: custom
+        custom_payload: |
+          {
+            "channel": "#dev-alerts",
+            "attachments": [
+              {
+                "color": "${{ job.status == 'success' && 'good' || 'danger' }}",
+                "title": "${{ job.status == 'success' && '✅ Smoke Tests Passed' || '❌ Smoke Tests Failed' }}",
+                "fields": [
+                  {
+                    "title": "Repository",
+                    "value": "${{ github.repository }}",
+                    "short": true
+                  },
+                  {
+                    "title": "Branch",
+                    "value": "${{ github.ref_name }}",
+                    "short": true
+                  },
+                  {
+                    "title": "Commit",
+                    "value": "${{ github.sha }}",
+                    "short": true
+                  },
+                  {
+                    "title": "Test Results",
+                    "value": "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Artifacts>",
+                    "short": true
+                  }
+                ],
+                "text": "${{ job.status == 'success' && 'All edge function endpoints responding correctly with Sentry monitoring active.' || 'Edge function smoke tests failed. Check artifacts for detailed logs.' }}"
+              }
+            ]
+          }
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+    - name: Post detailed failure logs to Slack
+      if: failure()
+      run: |
+        if [ -f "test-results/smoke-test-output.log" ]; then
+          echo "Extracting failure details for Slack..."
+          FAILURE_LOGS=$(head -20 test-results/smoke-test-output.log | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
+          
+          curl -X POST -H 'Content-type: application/json' \
+            --data "{
+              \"channel\": \"#dev-alerts\",
+              \"attachments\": [
+                {
+                  \"color\": \"danger\",
+                  \"title\": \"🚨 Smoke Test Failure Details\",
+                  \"fields\": [
+                    {
+                      \"title\": \"First 20 lines of test output:\",
+                      \"value\": \"\`\`\`${FAILURE_LOGS}\`\`\`\",
+                      \"short\": false
+                    }
+                  ]
+                }
+              ]
+            }" \
+            ${{ secrets.SLACK_WEBHOOK_URL }}
+        fi
+
     - name: Deploy to Vercel
       id: vercel-deploy
       if: github.ref == 'refs/heads/main' && github.event_name == 'push'
