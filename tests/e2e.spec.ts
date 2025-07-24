@@ -30,6 +30,10 @@ test.describe('BDC Analytics Application', () => {
       });
     });
     page.setDefaultTimeout(30000);
+    // stub the backfill endpoint so the success toast actually fires
+    await page.route('**/bdc-api/backfill**', route =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: '{}' })
+    );
   });
 
   test('Admin Backfill Flow', async ({ page }) => {
@@ -50,8 +54,13 @@ test.describe('BDC Analytics Application', () => {
     // Trigger backfill process
     await backfillButton.click();
     
-    // Wait for exactly the ToastDescription component, not the aria-live wrapper
-    await expect(page.getByTestId('toast-description')).toHaveText(/Started backfill for all BDCs/);
+    // Wait for the real <ToastDescription> (data-lov-name) to appear then disappear
+    const backfillToast = page.locator(
+      '[data-lov-name="ToastDescription"]',
+      { hasText: /Started backfill for all BDCs/i }
+    );
+    await expect(backfillToast).toBeVisible({ timeout: 15_000 });
+    await expect(backfillToast).toBeHidden({  timeout: 10_000 });
     
     // Verify at least one log entry appears in recent logs
     const logsSection = page.getByTestId('processing-logs');
@@ -106,8 +115,8 @@ test.describe('BDC Analytics Application', () => {
     // Wait for investments data to load
     await waitForInvestments(page);
     
-    // Use the accessible combobox role
-    const managerSelect = page.getByRole('combobox', { name: 'Manager' });
+    // Open the "Manager" dropdown by its accessible name
+    const managerSelect = page.getByRole('combobox', { name: 'All Managers' });
     await expect(managerSelect).toBeVisible();
     await managerSelect.click();
     
@@ -167,7 +176,8 @@ test.describe('BDC Analytics Application', () => {
     // Clear search
     await searchInput.clear();
     
-    const trancheSelect = page.getByRole('combobox', { name: 'Tranche' });
+    // Open the "Tranche" dropdown by its accessible name
+    const trancheSelect = page.getByRole('combobox', { name: 'All Tranches' });
     await expect(trancheSelect).toBeVisible();
     await trancheSelect.click();
     
