@@ -19,6 +19,7 @@ export type Database = {
           cik: string | null
           company_name: string
           created_at: string
+          fiscal_year_end: string | null
           id: string
           is_active: boolean
           ticker: string
@@ -28,6 +29,7 @@ export type Database = {
           cik?: string | null
           company_name: string
           created_at?: string
+          fiscal_year_end?: string | null
           id?: string
           is_active?: boolean
           ticker: string
@@ -37,6 +39,7 @@ export type Database = {
           cik?: string | null
           company_name?: string
           created_at?: string
+          fiscal_year_end?: string | null
           id?: string
           is_active?: boolean
           ticker?: string
@@ -228,12 +231,62 @@ export type Database = {
           },
         ]
       }
+      scheduled_jobs: {
+        Row: {
+          created_at: string
+          error_message: string | null
+          id: string
+          job_type: string
+          last_run_at: string | null
+          next_run_at: string | null
+          scheduled_date: string
+          status: string
+          ticker: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          job_type: string
+          last_run_at?: string | null
+          next_run_at?: string | null
+          scheduled_date: string
+          status?: string
+          ticker: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          job_type?: string
+          last_run_at?: string | null
+          next_run_at?: string | null
+          scheduled_date?: string
+          status?: string
+          ticker?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      calculate_next_filing_dates: {
+        Args: { fye_date: string }
+        Returns: {
+          filing_type: string
+          quarter_end: string
+          due_date: string
+        }[]
+      }
+      check_new_filings: {
+        Args: Record<PropertyKey, never>
+        Returns: undefined
+      }
     }
     Enums: {
       [_ in never]: never
