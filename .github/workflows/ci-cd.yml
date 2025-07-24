@@ -97,15 +97,48 @@ jobs:
       env:
         SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
 
-    - name: Run Edge Function Smoke Tests
+    - name: Wait for function deployment
       run: |
-        echo "Running smoke tests for Edge Functions..."
-        deno run --allow-net --allow-env tests/quick-test.ts
+        echo "Waiting for functions to be ready..."
+        sleep 30
+
+    - name: Run Edge Function Smoke Tests
+      id: smoke-tests
+      run: |
+        echo "Running comprehensive smoke tests..."
+        mkdir -p test-results
+        deno run --allow-net --allow-env tests/smoke-test.ts 2>&1 | tee test-results/smoke-test-output.log
       env:
         SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
         SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        SENTRY_DSN_EDGE: ${{ secrets.SENTRY_DSN_EDGE }}
+
+    - name: Upload smoke test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: smoke-test-results
+        path: test-results/
+        retention-days: 7
+
+    - name: Verify smoke test success
+      run: |
+        if [ -f "test-results/smoke-test-output.log" ]; then
+          echo "Checking smoke test results..."
+          if grep -q "All tests passed!" test-results/smoke-test-output.log; then
+            echo "✅ Smoke tests passed successfully"
+          else
+            echo "❌ Smoke tests failed - check the logs"
+            cat test-results/smoke-test-output.log
+            exit 1
+          fi
+        else
+          echo "❌ Smoke test output not found"
+          exit 1
+        fi
 
     - name: Deploy to Vercel
+      id: vercel-deploy
       if: github.ref == 'refs/heads/main' && github.event_name == 'push'
       uses: amondnet/vercel-action@v25
       with:
@@ -114,6 +147,16 @@ jobs:
         vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
         vercel-args: '--prod'
         working-directory: ./
+
+    - name: Run production smoke tests
+      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      run: |
+        echo "Running smoke tests against production deployment..."
+        mkdir -p test-results/production
+        deno run --allow-net --allow-env tests/quick-test.ts 2>&1 | tee test-results/production/prod-smoke-test.log
+      env:
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
 
     # Alternative: Deploy to Netlify (uncomment if using Netlify instead)
     # - name: Deploy to Netlify
@@ -148,6 +191,8 @@ jobs:
           Branch: `${{ github.ref_name }}`
           Commit: `${{ github.sha }}`
           Live URL: https://your-app.vercel.app
+          Edge Functions: ✅ Deployed & Tested
+          Smoke Tests: ✅ Passed
           Test Reports: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       env:
         SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
@@ -163,7 +208,13 @@ jobs:
           Branch: `${{ github.ref_name }}`
           Commit: `${{ github.sha }}`
           Failed Job: ${{ github.job }}
-          Test Reports: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          Please check the logs for details.
+          Possible Causes:
+          - Edge function deployment failed
+          - Smoke tests failed
+          - Frontend build issues
+          - Sentry monitoring not working
+          
+          Artifacts: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          Please check the logs and smoke test results.
       env:
         SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
