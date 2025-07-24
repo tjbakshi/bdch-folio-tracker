@@ -22,8 +22,9 @@ export function Toaster() {
               className="text-sm opacity-90"
               data-testid="toast-message"
             >
-              {title && <div className="font-semibold">{title}</div>}
-              {description && <div>{description}</div>}
+              {title && title}
+              {description && description}
+              {!title && !description && "Notification"}
             </div>
             {action}
             <ToastClose />
