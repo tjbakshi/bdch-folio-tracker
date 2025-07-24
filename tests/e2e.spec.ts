@@ -10,8 +10,8 @@ test.describe('BDC Analytics Application', () => {
   test.beforeEach(async ({ page }) => {
     // Set longer timeout for API calls
     page.setDefaultTimeout(30000);
-
-    // Globally mock investments API so every test sees consistent data
+    // ── GLOBAL INVESTMENTS STUB ───────────────────────────────────────────────
+    // so that the dashboard & detail tests always see at least one row
     await page.route('**/bdc-api/investments**', async route => {
       await route.fulfill({
         status: 200,
@@ -65,10 +65,10 @@ test.describe('BDC Analytics Application', () => {
     // Trigger backfill process
     await backfillButton.click();
     
-    // Wait for success toast to appear
-    const toastDesc = page.locator('[data-lov-name="ToastDescription"]', { hasText: /started backfill/i });
-    await expect(toastDesc).toBeVisible({ timeout: 15000 });
-    await expect(toastDesc).toBeHidden({ timeout: 10000 });
+    // Wait for success toast to appear (only the description, not the live-region wrapper)
+    const toast = page.locator('[data-lov-name="ToastDescription"]', { hasText: /started backfill/i });
+    await expect(toast).toBeVisible({ timeout: 15000 });
+    await expect(toast).toBeHidden({ timeout: 10000 });
     
     // Verify at least one log entry appears in recent logs
     const logsSection = page.getByTestId('processing-logs');
@@ -123,7 +123,7 @@ test.describe('BDC Analytics Application', () => {
     // Wait for investments data to load
     await waitForInvestments(page);
     
-    // Apply manager filter using role selector
+    // There is no data-testid; use accessible combobox labeled "All Managers"
     const managerSelect = page.getByRole('combobox', { name: 'All Managers' });
     await expect(managerSelect).toBeVisible();
     await managerSelect.click();
@@ -184,7 +184,7 @@ test.describe('BDC Analytics Application', () => {
     // Clear search
     await searchInput.clear();
     
-    // Test tranche filter using role selector
+    // There is no data-testid; use accessible combobox labeled "All Tranches"
     const trancheSelect = page.getByRole('combobox', { name: 'All Tranches' });
     await expect(trancheSelect).toBeVisible();
     await trancheSelect.click();
@@ -234,10 +234,8 @@ test.describe('BDC Analytics Application', () => {
     // Should redirect to /docs.html
     await page.waitForURL('**/docs.html', { timeout: 10000 });
     
-    // Verify Swagger UI elements are present
-    await expect(
-      page.locator('section.swagger-ui.swagger-container')
-    ).toBeVisible({ timeout: 20000 });
+    // Two .swagger-ui elements exist; target the outer container only
+    await expect(page.locator('section.swagger-ui.swagger-container')).toBeVisible({ timeout: 15000 });
     
     // Verify custom header is present
     await expect(page.getByRole('heading', { name: 'BDC Investment Analytics API' })).toBeVisible();
