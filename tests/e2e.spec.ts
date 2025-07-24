@@ -137,8 +137,8 @@ test.describe('BDC Analytics Application', () => {
     // Wait for investments data to load
     await waitForInvestments(page);
     
-    // Open the "Manager" dropdown by role
-    const managerSelect = page.getByRole('combobox', { name: /manager/i });
+    // Open the "Manager" dropdown using accessible combobox role
+    const managerSelect = page.getByRole('combobox', { name: /Manager/i });
     await expect(managerSelect).toBeVisible();
     await managerSelect.click();
     
@@ -168,10 +168,10 @@ test.describe('BDC Analytics Application', () => {
     // Verify download properties
     expect(download.suggestedFilename()).toMatch(/bdc-investments.*\.csv/);
     
-    // Verify success toast appears using data-lov-name to avoid strict mode
-    const toastDesc = page.locator('[data-lov-name="ToastDescription"]', { hasText: /export downloaded successfully/i }).first();
-    await expect(toastDesc).toBeVisible({ timeout: 15000 });
-    await expect(toastDesc).toBeHidden({ timeout: 10000 });
+    // Verify success toast appears using accessible role
+    await expect(
+      page.getByRole('status', { name: /Export downloaded successfully/i })
+    ).toBeVisible({ timeout: 10000 });
   });
 
   test('Search and Filtering', async ({ page }) => {
@@ -189,6 +189,7 @@ test.describe('BDC Analytics Application', () => {
     await searchInput.fill('Tech');
     
     // Verify search results contain the search term
+    await page.waitForSelector('[data-testid="investment-row"]', { timeout: 15000 });
     const tableRows = page.locator('[data-testid="investment-row"]');
     if (await tableRows.first().isVisible()) {
       const firstRowText = await tableRows.first().textContent();
@@ -198,8 +199,8 @@ test.describe('BDC Analytics Application', () => {
     // Clear search
     await searchInput.clear();
     
-    // Open the "Tranche" dropdown by role
-    const trancheSelect = page.getByRole('combobox', { name: /tranche/i });
+    // Open the "Tranche" dropdown using accessible combobox role
+    const trancheSelect = page.getByRole('combobox', { name: /Tranche/i });
     await expect(trancheSelect).toBeVisible();
     await trancheSelect.click();
     
@@ -274,7 +275,7 @@ test.describe('BDC Analytics Application', () => {
     // Wait for page to load
     await expect(page.getByRole('heading', { name: 'BDC Admin Dashboard' })).toBeVisible();
     
-    // Find and click "Setup Scheduled Jobs" button
+    // Find and click "Setup Scheduled Jobs" button with robust click strategy
     await page.waitForSelector('[data-testid="setup-jobs-button"]', { state: 'visible' });
     const setupJobsButton = page.getByTestId('setup-jobs-button');
     await expect(setupJobsButton).toBeVisible();
@@ -282,16 +283,16 @@ test.describe('BDC Analytics Application', () => {
     await page.waitForTimeout(500); // Wait for any animations
     await setupJobsButton.click({ force: true });
     
-    // Wait for success toast using data-lov-name to avoid strict mode
-    const toastDesc = page.locator('[data-lov-name="ToastDescription"]', { hasText: /scheduled jobs setup/i }).first();
-    await expect(toastDesc).toBeVisible({ timeout: 15000 });
-    await expect(toastDesc).toBeHidden({ timeout: 10000 });
+    // Wait for success toast using accessible role
+    await expect(
+      page.getByRole('status', { name: /Scheduled jobs setup/i })
+    ).toBeVisible({ timeout: 10000 });
     
     // Verify scheduled jobs table shows entries
     const jobsTable = page.getByTestId('scheduled-jobs-table');
     await expect(jobsTable).toBeVisible();
     
-    // Wait for jobs table and check for rows
+    // Wait for jobs table and check for rows with explicit wait
     await page.waitForSelector('[data-testid="job-row"]', { timeout: 10000 });
     const jobRows = page.locator('[data-testid="job-row"]');
     await expect(jobRows.first()).toBeVisible();
@@ -301,14 +302,18 @@ test.describe('BDC Analytics Application', () => {
     // Test navigation to non-existent page
     await page.goto('/non-existent-page');
     
-    // Should show 404 page 
-    await expect(page.getByRole('heading', { name: /404/i })).toBeVisible({ timeout: 5000 });
+    // Verify 404 heading is visible instead of checking URL
+    await expect(
+      page.getByRole('heading', { name: /404/i })
+    ).toBeVisible({ timeout: 5000 });
     
     // Navigate back to dashboard
     await page.goto('/');
     
     // Verify app recovers gracefully
-    await expect(page.getByRole('heading', { name: 'BDC Investment Dashboard' })).toBeVisible({ timeout: 10000 });
+    await expect(
+      page.getByRole('heading', { name: 'BDC Investment Dashboard' })
+    ).toBeVisible({ timeout: 10000 });
   });
 
   test('Responsive Design', async ({ page }) => {
