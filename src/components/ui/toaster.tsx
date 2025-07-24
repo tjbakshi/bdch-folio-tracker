@@ -17,7 +17,7 @@ export function Toaster() {
         return (
           <Toast key={id} {...props}>
             {description && (
-              <ToastDescription data-lov-name="ToastDescription">
+              <ToastDescription data-testid="toast-description">
                 {description}
               </ToastDescription>
             )}
