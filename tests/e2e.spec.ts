@@ -265,6 +265,8 @@ test.describe('BDC Analytics Application', () => {
     await page.waitForSelector('[data-testid="setup-jobs-button"]', { state: 'visible' });
     const setupJobsButton = page.getByTestId('setup-jobs-button');
     await expect(setupJobsButton).toBeVisible();
+    await setupJobsButton.scrollIntoViewIfNeeded();
+    await page.waitForTimeout(500); // Wait for any animations
     await setupJobsButton.click();
     
     // Wait for success toast
