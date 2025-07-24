@@ -81,10 +81,8 @@ test.describe('BDC Analytics Application', () => {
     // Navigate to dashboard
     await page.goto('/');
     
-    // Wait for API response
-    await page.waitForResponse(r =>
-      r.url().includes('/bdc-api/investments') && r.status() === 200
-    );
+    // Wait for investments data to load
+    await waitForInvestments(page);
     
     // Verify main dashboard elements are visible
     await expect(page.getByRole('heading', { name: 'BDC Investment Dashboard' })).toBeVisible();
@@ -110,9 +108,8 @@ test.describe('BDC Analytics Application', () => {
     const holdingsTable = page.getByTestId('holdings-table');
     await expect(holdingsTable).toBeVisible();
     
-    // Wait for API response and then verify table rows
-    await page.waitForResponse(r => r.url().includes('/bdc-api/investments') && r.status() === 200);
-    await page.waitForSelector('[data-testid="investment-row"]', { timeout: 15000 });
+    // Wait for investments data and verify table rows
+    await waitForInvestments(page);
     const tableRows = page.locator('[data-testid="investment-row"]');
     await expect(tableRows.first()).toBeVisible();
   });
@@ -121,24 +118,12 @@ test.describe('BDC Analytics Application', () => {
     // Navigate to dashboard
     await page.goto('/');
     
-    // Wait for API response
-    await page.waitForResponse(r =>
-      r.url().includes('/bdc-api/investments') && r.status() === 200
-    );
+    // Wait for investments data to load
+    await waitForInvestments(page);
     
-    // Apply manager filter - try both role and testid selectors
-    const managerSelectRole = page.getByRole('combobox', { name: /manager/i });
-    const managerSelectTestId = page.getByTestId('manager-filter');
-
-    // Try role selector first, fall back to testid
-    let managerSelect;
-    if (await managerSelectRole.isVisible({ timeout: 5000 }).catch(() => false)) {
-      managerSelect = managerSelectRole;
-    } else {
-      managerSelect = managerSelectTestId;
-      await expect(managerSelect).toBeVisible();
-    }
-
+    // Apply manager filter using label selector
+    const managerSelect = page.getByLabel('Manager');
+    await expect(managerSelect).toBeVisible();
     await managerSelect.click();
     
     // Select ARCC (or first available option)
@@ -177,10 +162,8 @@ test.describe('BDC Analytics Application', () => {
     // Navigate to dashboard
     await page.goto('/');
     
-    // Wait for API response
-    await page.waitForResponse(r =>
-      r.url().includes('/bdc-api/investments') && r.status() === 200
-    );
+    // Wait for investments data to load
+    await waitForInvestments(page);
     
     // Test search functionality
     const searchInput = page.getByTestId('search-input');
@@ -199,19 +182,9 @@ test.describe('BDC Analytics Application', () => {
     // Clear search
     await searchInput.clear();
     
-    // Test tranche filter - try both role and testid selectors
-    const trancheSelectRole = page.getByRole('combobox', { name: /tranche/i });
-    const trancheSelectTestId = page.getByTestId('tranche-filter');
-
-    // Try role selector first, fall back to testid
-    let trancheSelect;
-    if (await trancheSelectRole.isVisible({ timeout: 5000 }).catch(() => false)) {
-      trancheSelect = trancheSelectRole;
-    } else {
-      trancheSelect = trancheSelectTestId;
-      await expect(trancheSelect).toBeVisible();
-    }
-
+    // Test tranche filter using label selector
+    const trancheSelect = page.getByLabel('Tranche');
+    await expect(trancheSelect).toBeVisible();
     await trancheSelect.click();
     
     // Select First Lien
@@ -231,18 +204,13 @@ test.describe('BDC Analytics Application', () => {
     // Navigate to dashboard
     await page.goto('/');
     
-    // Wait for API response
-    await page.waitForResponse(r =>
-      r.url().includes('/bdc-api/investments') && r.status() === 200
-    );
-    
-    // Wait for API response and then find first investment row
-    await page.waitForResponse(r => r.url().includes('/bdc-api/investments') && r.status() === 200);
-    await page.waitForSelector('[data-testid="investment-row"]', { timeout: 15000 });
-    const firstInvestmentRow = page.locator('[data-testid="investment-row"]').first();
-    await expect(firstInvestmentRow).toBeVisible();
+    // Wait for investments data to load
+    await waitForInvestments(page);
     
     // Get investment company name for verification
+    await waitForInvestments(page);
+    const firstInvestmentRow = page.locator('[data-testid="investment-row"]').first();
+    await expect(firstInvestmentRow).toBeVisible();
     const companyName = await firstInvestmentRow.getByTestId('company-name').textContent();
     
     // Click on the investment row to view details
@@ -268,7 +236,9 @@ test.describe('BDC Analytics Application', () => {
     await page.waitForURL('**/docs.html', { timeout: 10000 });
     
     // Verify Swagger UI elements are present
-    await expect(page.locator('section.swagger-ui').first()).toBeVisible({ timeout: 15000 });
+    await expect(
+      page.locator('section.swagger-ui.swagger-container')
+    ).toBeVisible({ timeout: 20000 });
     
     // Verify custom header is present
     await expect(page.getByRole('heading', { name: 'BDC Investment Analytics API' })).toBeVisible();
@@ -331,10 +301,8 @@ test.describe('BDC Analytics Application', () => {
     await page.setViewportSize({ width: 375, height: 667 });
     await page.goto('/');
     
-    // Wait for API response
-    await page.waitForResponse(r =>
-      r.url().includes('/bdc-api/investments') && r.status() === 200
-    );
+    // Wait for investments data to load
+    await waitForInvestments(page);
     
     // Verify mobile layout works
     await expect(page.getByRole('heading', { name: 'BDC Investment Dashboard' })).toBeVisible();
@@ -355,6 +323,9 @@ test.describe('BDC Analytics Application', () => {
   });
   
   test('Dashboard POST-Only Functionality', async ({ page }) => {
+    // Un-route the global stub first
+    page.unroute('**/bdc-api/investments**');
+    
     // Block all GET requests to /investments and ensure dashboard still works via POST
     await page.route('**/bdc-api/investments**', async route => {
       const method = route.request().method();
@@ -411,10 +382,8 @@ test.describe('BDC Analytics Application', () => {
     // Navigate to dashboard
     await page.goto('/');
     
-    // Wait for API response - should work via POST only
-    await page.waitForResponse(r =>
-      r.url().includes('/bdc-api/investments') && r.status() === 200
-    );
+    // Wait for investments data to load
+    await waitForInvestments(page);
     
     // Verify dashboard loads successfully with POST-only data
     await expect(page.getByRole('heading', { name: 'BDC Investment Dashboard' })).toBeVisible();
@@ -431,18 +400,9 @@ test.describe('BDC Analytics Application', () => {
     const totalAssetsCard = page.getByTestId('total-assets-card');
     await expect(totalAssetsCard).toBeVisible();
     
-    // Test that filtering still works with POST - try both selectors
-    const managerSelectRole = page.getByRole('combobox', { name: /manager/i });
-    const managerSelectTestId = page.getByTestId('manager-filter');
-
-    let managerSelect;
-    if (await managerSelectRole.isVisible({ timeout: 5000 }).catch(() => false)) {
-      managerSelect = managerSelectRole;
-    } else {
-      managerSelect = managerSelectTestId;
-      await expect(managerSelect).toBeVisible();
-    }
-
+    // Test that filtering still works with POST using label selector
+    const managerSelect = page.getByLabel('Manager');
+    await expect(managerSelect).toBeVisible();
     await managerSelect.click();
     
     // Select "All Managers" to trigger a new POST request
@@ -455,6 +415,9 @@ test.describe('BDC Analytics Application', () => {
   });
   
   test('Network Error Handling for Investments API', async ({ page }) => {
+    // Un-route the global stub first
+    page.unroute('**/bdc-api/investments**');
+    
     // Test dashboard behavior when investments API returns various errors
     let requestCount = 0;
     
@@ -504,9 +467,20 @@ test.describe('BDC Analytics Application', () => {
 });
 
 /**
+ * Helper function to wait for investments data to load
+ */
+async function waitForInvestments(page: Page) {
+  await page.waitForResponse(r =>
+    r.url().includes('/bdc-api/investments') && r.status() === 200
+  );
+  await page.waitForSelector('[data-testid="investment-row"]', { timeout: 15000 });
+}
+
+/**
  * Helper function to wait for toast to appear and disappear
  */
-async function waitForToast(page: Page, message: string | RegExp) {
-  await expect(page.getByText(message).first()).toBeVisible();
-  await expect(page.getByText(message).first()).toBeHidden({ timeout: 10000 });
+async function waitForToast(page: Page, message: RegExp) {
+  const locator = page.locator(`:text-matches("${message.source}", "i")`, { strict: false }).first();
+  await expect(locator).toBeVisible({ timeout: 15000 });
+  await expect(locator).toBeHidden({ timeout: 10000 });
 }
