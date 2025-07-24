@@ -31,7 +31,7 @@ test.describe('BDC Analytics Application', () => {
     await backfillButton.click();
     
     // Wait for success toast to appear
-    await expect(page.getByText(/started backfill/i)).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText(/started backfill/i).first()).toBeVisible({ timeout: 10000 });
     
     // Wait a moment for logs to potentially update
     await page.waitForTimeout(3000);
@@ -132,6 +132,7 @@ test.describe('BDC Analytics Application', () => {
     await expect(page.getByText('Loading dashboard data...')).toBeHidden({ timeout: 15000 });
     
     // Apply manager filter
+    await page.waitForSelector('[data-testid="manager-filter"]', { state: 'visible' });
     const managerSelect = page.getByTestId('manager-filter');
     await expect(managerSelect).toBeVisible();
     await managerSelect.click();
@@ -168,7 +169,7 @@ test.describe('BDC Analytics Application', () => {
     expect(download.suggestedFilename()).toMatch(/bdc-investments.*\.csv/);
     
     // Verify success toast appears
-    await expect(page.getByText(/export downloaded successfully/i)).toBeVisible();
+    await expect(page.getByText(/export downloaded successfully/i).first()).toBeVisible();
   });
 
   test('Search and Filtering', async ({ page }) => {
@@ -200,6 +201,7 @@ test.describe('BDC Analytics Application', () => {
     await page.waitForTimeout(500);
     
     // Test tranche filter
+    await page.waitForSelector('[data-testid="tranche-filter"]', { state: 'visible' });
     const trancheSelect = page.getByTestId('tranche-filter');
     await expect(trancheSelect).toBeVisible();
     await trancheSelect.click();
@@ -257,7 +259,7 @@ test.describe('BDC Analytics Application', () => {
     await page.waitForURL('**/docs.html', { timeout: 10000 });
     
     // Verify Swagger UI elements are present
-    await expect(page.locator('.swagger-ui')).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('.swagger-ui').first()).toBeVisible({ timeout: 15000 });
     
     // Verify custom header is present
     await expect(page.getByRole('heading', { name: 'BDC Investment Analytics API' })).toBeVisible();
@@ -281,12 +283,13 @@ test.describe('BDC Analytics Application', () => {
     await expect(page.getByRole('heading', { name: 'BDC Admin Dashboard' })).toBeVisible();
     
     // Find and click "Setup Scheduled Jobs" button
+    await page.waitForSelector('[data-testid="setup-jobs-button"]', { state: 'visible' });
     const setupJobsButton = page.getByTestId('setup-jobs-button');
     await expect(setupJobsButton).toBeVisible();
     await setupJobsButton.click();
     
     // Wait for success toast
-    await expect(page.getByText(/scheduled jobs setup/i)).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText(/scheduled jobs setup/i).first()).toBeVisible({ timeout: 10000 });
     
     // Verify scheduled jobs table shows entries
     const jobsTable = page.getByTestId('scheduled-jobs-table');
@@ -302,7 +305,7 @@ test.describe('BDC Analytics Application', () => {
     await page.goto('/non-existent-page');
     
     // Should show 404 or redirect to a valid page
-    await expect(page).toHaveURL(/.*\/(?:404|not-found|\*)/, { timeout: 5000 });
+    await expect(page).toHaveURL(/\/(?:404|not-found|\*|non-existent-page)$/, { timeout: 5000 });
     
     // Navigate back to dashboard
     await page.goto('/');
@@ -413,6 +416,7 @@ test.describe('BDC Analytics Application', () => {
     await expect(totalAssetsCard).toBeVisible();
     
     // Test that filtering still works with POST
+    await page.waitForSelector('[data-testid="manager-filter"]', { state: 'visible' });
     const managerSelect = page.getByTestId('manager-filter');
     await expect(managerSelect).toBeVisible();
     await managerSelect.click();
