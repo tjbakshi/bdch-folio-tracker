@@ -27,8 +27,8 @@ export default function BDCDashboard() {
   });
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
-  const [selectedManager, setSelectedManager] = useState("");
-  const [selectedTranche, setSelectedTranche] = useState("");
+  const [selectedManager, setSelectedManager] = useState("all");
+  const [selectedTranche, setSelectedTranche] = useState("all");
   const [managers, setManagers] = useState<string[]>([]);
   const { toast } = useToast();
 
