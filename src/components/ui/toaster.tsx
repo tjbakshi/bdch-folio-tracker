@@ -16,16 +16,12 @@ export function Toaster() {
       {toasts.map(function ({ id, title, description, action, ...props }) {
         return (
           <Toast key={id} {...props}>
-            <div 
-              role="status"
-              aria-live="assertive"
-              className="text-sm opacity-90"
-              data-testid="toast-message"
-            >
-              {title && title}
-              {description && description}
-              {!title && !description && "Notification"}
-            </div>
+            {title && <ToastTitle>{title}</ToastTitle>}
+            {description && (
+              <ToastDescription data-lov-name="ToastDescription">
+                {description}
+              </ToastDescription>
+            )}
             {action}
             <ToastClose />
           </Toast>
