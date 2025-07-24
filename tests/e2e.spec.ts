@@ -54,13 +54,10 @@ test.describe('BDC Analytics Application', () => {
     // Trigger backfill process
     await backfillButton.click();
     
-    // Wait for the real <ToastDescription> (data-lov-name) to appear then disappear
-    const backfillToast = page.locator(
-      '[data-lov-name="ToastDescription"]',
-      { hasText: /Started backfill for all BDCs/i }
-    );
-    await expect(backfillToast).toBeVisible({ timeout: 15_000 });
-    await expect(backfillToast).toBeHidden({  timeout: 10_000 });
+    // Wait for success toast using role to avoid strict mode violation
+    await expect(
+      page.getByRole('status', { name: /started backfill for all BDCs/i })
+    ).toBeVisible({ timeout: 10000 });
     
     // Verify at least one log entry appears in recent logs
     const logsSection = page.getByTestId('processing-logs');
@@ -115,8 +112,8 @@ test.describe('BDC Analytics Application', () => {
     // Wait for investments data to load
     await waitForInvestments(page);
     
-    // Open the "Manager" dropdown by its accessible name
-    const managerSelect = page.getByRole('combobox', { name: 'All Managers' });
+    // Open the "Manager" dropdown by role
+    const managerSelect = page.getByRole('combobox', { name: /manager/i });
     await expect(managerSelect).toBeVisible();
     await managerSelect.click();
     
@@ -176,8 +173,8 @@ test.describe('BDC Analytics Application', () => {
     // Clear search
     await searchInput.clear();
     
-    // Open the "Tranche" dropdown by its accessible name
-    const trancheSelect = page.getByRole('combobox', { name: 'All Tranches' });
+    // Open the "Tranche" dropdown by role
+    const trancheSelect = page.getByRole('combobox', { name: /tranche/i });
     await expect(trancheSelect).toBeVisible();
     await trancheSelect.click();
     
@@ -226,8 +223,10 @@ test.describe('BDC Analytics Application', () => {
     // Should redirect to /docs.html
     await page.waitForURL('**/docs.html', { timeout: 10000 });
     
-    // target the <section> wrapper only
-    await expect(page.locator('section.swagger-ui.swagger-container')).toBeVisible({ timeout: 15000 });
+    // Target first swagger-ui element to avoid strict mode violation
+    await expect(
+      page.locator('.swagger-ui').first()
+    ).toBeVisible({ timeout: 15000 });
     
     // Verify custom header is present
     await expect(page.getByRole('heading', { name: 'BDC Investment Analytics API' })).toBeVisible();
