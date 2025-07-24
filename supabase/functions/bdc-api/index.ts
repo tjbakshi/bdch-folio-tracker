@@ -1,34 +1,13 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import * as Sentry from "https://deno.land/x/sentry_serverless_deno@0.1.1/mod.ts";
+import { Sentry } from './lib/sentry.ts';
 
-// Initialize Sentry for Edge Function monitoring
-const sentryDsn = Deno.env.get('SENTRY_DSN_EDGE');
-if (sentryDsn && !sentryDsn.includes('your-sentry-dsn')) {
-  Sentry.init({
-    dsn: sentryDsn,
-    environment: Deno.env.get('ENVIRONMENT') || 'production',
-    tracesSampleRate: 1.0,
-    beforeSend(event) {
-      // Add function context
-      event.contexts = {
-        ...event.contexts,
-        runtime: {
-          name: 'deno',
-          version: Deno.version.deno,
-        },
-        function: {
-          name: 'bdc-api',
-          type: 'supabase-edge-function',
-        }
-      };
-      return event;
-    }
-  });
-}
-
-// CORS headers
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+};
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -38,7 +17,8 @@ const corsHeaders = {
 /**
  * BDC API Edge Function - provides REST endpoints for dashboard and export functionality
  */
-serve(Sentry.withSentry(async (req) => {
+serve(async (req) => {
+  return Sentry.withSentry(async () => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -139,7 +119,8 @@ serve(Sentry.withSentry(async (req) => {
   } finally {
     transaction.finish();
   }
-}));
+  });
+});
 
 /**
  * Search investments with filters and pagination
