@@ -95,8 +95,8 @@ export default function BDCDashboard() {
     try {
       const filters = {
         company: searchTerm || undefined,
-        manager: selectedManager || undefined,
-        tranche: selectedTranche || undefined
+        manager: (selectedManager && selectedManager !== "all") ? selectedManager : undefined,
+        tranche: (selectedTranche && selectedTranche !== "all") ? selectedTranche : undefined
       };
 
       const csvData = await exportData(filters);
@@ -154,8 +154,8 @@ export default function BDCDashboard() {
       investment.company_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       investment.business_description?.toLowerCase().includes(searchTerm.toLowerCase());
     
-    const matchesManager = !selectedManager || investment.filings?.ticker === selectedManager;
-    const matchesTranche = !selectedTranche || investment.investment_tranche?.includes(selectedTranche);
+    const matchesManager = !selectedManager || selectedManager === "all" || investment.filings?.ticker === selectedManager;
+    const matchesTranche = !selectedTranche || selectedTranche === "all" || investment.investment_tranche?.includes(selectedTranche);
     
     return matchesSearch && matchesManager && matchesTranche;
   });
@@ -276,7 +276,7 @@ export default function BDCDashboard() {
                   <SelectValue placeholder="Select Manager" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All Managers</SelectItem>
+                  <SelectItem value="all">All Managers</SelectItem>
                   {managers.map((manager) => (
                     <SelectItem key={manager} value={manager}>
                       {manager}
@@ -291,7 +291,7 @@ export default function BDCDashboard() {
                   <SelectValue placeholder="Select Tranche" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All Tranches</SelectItem>
+                  <SelectItem value="all">All Tranches</SelectItem>
                   <SelectItem value="First Lien">First Lien</SelectItem>
                   <SelectItem value="Second Lien">Second Lien</SelectItem>
                   <SelectItem value="Equity">Equity</SelectItem>
