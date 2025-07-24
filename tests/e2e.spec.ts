@@ -66,7 +66,7 @@ test.describe('BDC Analytics Application', () => {
     await backfillButton.click();
     
     // Wait for success toast to appear
-    await waitForToast(page, /started backfill/i);
+    await waitForToast(page, /started backfill for all BDCs/i);
     
     // Verify at least one log entry appears in recent logs
     const logsSection = page.getByTestId('processing-logs');
@@ -109,6 +109,7 @@ test.describe('BDC Analytics Application', () => {
     await expect(holdingsTable).toBeVisible();
     
     // Check that table has at least one row of data
+    await page.waitForSelector('[data-testid="investment-row"]', { timeout: 10000 });
     const tableRows = page.locator('[data-testid="investment-row"]');
     await expect(tableRows.first()).toBeVisible();
   });
@@ -209,6 +210,7 @@ test.describe('BDC Analytics Application', () => {
     await expect(page.getByText('Loading dashboard data...')).toBeHidden({ timeout: 15000 });
     
     // Find first investment row
+    await page.waitForSelector('[data-testid="investment-row"]', { timeout: 10000 });
     const firstInvestmentRow = page.locator('[data-testid="investment-row"]').first();
     await expect(firstInvestmentRow).toBeVisible();
     
@@ -270,7 +272,7 @@ test.describe('BDC Analytics Application', () => {
     await setupJobsButton.click();
     
     // Wait for success toast
-    await waitForToast(page, /scheduled jobs setup/i);
+    await waitForToast(page, /scheduled jobs setup complete/i);
     
     // Verify scheduled jobs table shows entries
     const jobsTable = page.getByTestId('scheduled-jobs-table');
