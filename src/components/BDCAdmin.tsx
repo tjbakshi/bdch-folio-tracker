@@ -148,6 +148,7 @@ export default function BDCAdmin() {
             onClick={() => triggerBackfill()}
             disabled={!!processing}
             variant="default"
+            data-testid="backfill-all-button"
           >
             {processing === "backfill_all" ? (
               <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -160,6 +161,7 @@ export default function BDCAdmin() {
             onClick={setupScheduledJobs}
             disabled={!!processing}
             variant="outline"
+            data-testid="setup-jobs-button"
           >
             {processing === "setup_jobs" ? (
               <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -218,7 +220,7 @@ export default function BDCAdmin() {
           <CardDescription>Manage Business Development Companies</CardDescription>
         </CardHeader>
         <CardContent>
-          <Table>
+          <Table data-testid="bdc-universe-table">
             <TableHeader>
               <TableRow>
                 <TableHead>Ticker</TableHead>
@@ -270,7 +272,7 @@ export default function BDCAdmin() {
             <CardDescription>Automated filing checks</CardDescription>
           </CardHeader>
           <CardContent>
-            <Table>
+            <Table data-testid="scheduled-jobs-table">
               <TableHeader>
                 <TableRow>
                   <TableHead>Ticker</TableHead>
@@ -281,7 +283,7 @@ export default function BDCAdmin() {
               </TableHeader>
               <TableBody>
                 {jobs.slice(0, 5).map((job) => (
-                  <TableRow key={job.id}>
+                  <TableRow key={job.id} data-testid="job-row">
                     <TableCell>{job.ticker}</TableCell>
                     <TableCell>{job.job_type}</TableCell>
                     <TableCell>
@@ -311,9 +313,9 @@ export default function BDCAdmin() {
             <CardDescription>Recent system activity</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-2">
+            <div className="space-y-2" data-testid="processing-logs">
               {logs.slice(0, 5).map((log) => (
-                <div key={log.id} className="flex items-start space-x-2 text-sm">
+                <div key={log.id} className="flex items-start space-x-2 text-sm" data-testid="log-entry">
                   <Badge 
                     variant={
                       log.log_level === 'error' ? 'destructive' :

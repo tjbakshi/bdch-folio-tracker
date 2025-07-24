@@ -180,7 +180,7 @@ export default function BDCDashboard() {
           <p className="text-muted-foreground">Portfolio analytics and holdings overview</p>
         </div>
         <div className="flex items-center space-x-2">
-          <Button onClick={handleExport} variant="outline">
+          <Button onClick={handleExport} variant="outline" data-testid="export-button">
             <Download className="w-4 h-4 mr-2" />
             Export Data
           </Button>
@@ -193,7 +193,7 @@ export default function BDCDashboard() {
 
       {/* Summary Cards */}
       <div className="grid gap-6 md:grid-cols-4">
-        <Card>
+        <Card data-testid="total-assets-card">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Assets</CardTitle>
             <DollarSign className="w-4 h-4 text-muted-foreground" />
@@ -219,7 +219,7 @@ export default function BDCDashboard() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card data-testid="average-mark-card">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Average Mark</CardTitle>
             <div className="flex items-center">
@@ -266,11 +266,12 @@ export default function BDCDashboard() {
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="pl-9"
+                  data-testid="search-input"
                 />
               </div>
             </div>
             <div className="w-full md:w-48">
-              <Select value={selectedManager} onValueChange={setSelectedManager}>
+              <Select value={selectedManager} onValueChange={setSelectedManager} data-testid="manager-filter">
                 <SelectTrigger>
                   <SelectValue placeholder="Select Manager" />
                 </SelectTrigger>
@@ -285,7 +286,7 @@ export default function BDCDashboard() {
               </Select>
             </div>
             <div className="w-full md:w-48">
-              <Select value={selectedTranche} onValueChange={setSelectedTranche}>
+              <Select value={selectedTranche} onValueChange={setSelectedTranche} data-testid="tranche-filter">
                 <SelectTrigger>
                   <SelectValue placeholder="Select Tranche" />
                 </SelectTrigger>
@@ -311,7 +312,7 @@ export default function BDCDashboard() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <Table>
+          <Table data-testid="holdings-table">
             <TableHeader>
               <TableRow>
                 <TableHead>Company</TableHead>
@@ -330,30 +331,30 @@ export default function BDCDashboard() {
                 const isNonAccrual = computed?.is_non_accrual || false;
 
                 return (
-                  <TableRow key={investment.id}>
+                  <TableRow key={investment.id} data-testid="investment-row">
                     <TableCell>
                       <div>
-                        <div className="font-medium">{investment.company_name}</div>
+                        <div className="font-medium" data-testid="company-name">{investment.company_name}</div>
                         <div className="text-sm text-muted-foreground truncate max-w-xs">
                           {investment.business_description}
                         </div>
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Badge variant="outline">{investment.filings?.ticker}</Badge>
+                      <Badge variant="outline" data-testid="manager-badge">{investment.filings?.ticker}</Badge>
                     </TableCell>
-                    <TableCell>
+                    <TableCell data-testid="tranche-cell">
                       <span className="text-sm">{investment.investment_tranche}</span>
                     </TableCell>
-                    <TableCell className="text-right font-mono">
+                    <TableCell className="text-right font-mono" data-testid="principal-amount">
                       {formatCurrency(investment.principal_amount || 0)}
                     </TableCell>
-                    <TableCell className="text-right font-mono">
+                    <TableCell className="text-right font-mono" data-testid="fair-value">
                       {formatCurrency(investment.fair_value || 0)}
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-right" data-testid="mark-value">
                       <div className={`flex items-center justify-end space-x-1 ${getMarkColor(mark)}`}>
-                        {getMarkIcon(mark)}
+                        <span data-testid="mark-icon">{getMarkIcon(mark)}</span>
                         <span className="font-mono">{formatMark(mark)}</span>
                       </div>
                     </TableCell>

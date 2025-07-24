@@ -43,6 +43,14 @@ jobs:
     - name: Run front-end tests
       run: npm test --if-present
 
+    - name: Install Playwright Browsers
+      run: npx playwright install --with-deps
+
+    - name: Run E2E tests
+      run: npm run test:e2e
+      env:
+        PLAYWRIGHT_BASE_URL: http://localhost:5173
+
     - name: Build Vite application
       run: |
         echo "Building front-end application..."
