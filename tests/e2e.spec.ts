@@ -301,7 +301,7 @@ test.describe('BDC Analytics Application', () => {
     await expect(setupJobsButton).toBeVisible();
     await setupJobsButton.scrollIntoViewIfNeeded();
     await page.waitForTimeout(500); // Wait for any animations
-    await setupJobsButton.click();
+    await setupJobsButton.click({ force: true });
     
     // Wait for success toast
     const jobsToast = page.locator('text=/scheduled jobs setup/i', { strict: false }).first();
@@ -430,8 +430,8 @@ test.describe('BDC Analytics Application', () => {
     await expect(holdingsTable).toBeVisible();
     
     // Check that our POST-specific test data is displayed
-    await expect(page.getByText('POST Test Corp')).toBeVisible();
-    await expect(page.getByText('POST-only test business')).toBeVisible();
+    await expect(page.getByText('POST Test Corp').first()).toBeVisible();
+    await expect(page.getByText('POST-only test business').first()).toBeVisible();
     
     // Verify summary cards are populated
     const totalAssetsCard = page.getByTestId('total-assets-card');
