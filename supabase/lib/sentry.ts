@@ -1,5 +1,5 @@
 /**
- * Local Sentry-like logging utility for Supabase Edge Functions
+ * Shared Sentry-like logging utility for Supabase Edge Functions
  * Provides structured logging with transaction and span tracking
  */
 
@@ -124,7 +124,7 @@ class LocalSentry {
       timestamp: new Date().toISOString(),
       level,
       message,
-      function: 'bdc-api',
+      function: this.getCurrentFunction(),
       ...data
     };
 
@@ -136,6 +136,11 @@ class LocalSentry {
     } else {
       console.log(`[SENTRY] ${message}`, logEntry);
     }
+  }
+
+  private getCurrentFunction(): string {
+    // Try to determine function name from context or fallback
+    return this.context.function?.name || 'edge-function';
   }
 }
 
