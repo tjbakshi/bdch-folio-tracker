@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/react';
 import { supabase } from '@/integrations/supabase/client';
 import type {
   InvestmentSearchParams,
@@ -76,7 +77,7 @@ export class BDCApiClient {
   }
 
   /**
-   * Make API request using Supabase edge function invoke
+   * Make API request using Supabase edge function invoke with Sentry monitoring
    */
   private async makeRequest<T>(
     endpoint: string,
@@ -88,45 +89,93 @@ export class BDCApiClient {
   ): Promise<T> {
     const { method = 'GET', params, body } = options;
     
-    try {
-      let functionName: string;
-      let functionOptions: any = {};
+    // Start Sentry performance span
+    return Sentry.startSpan({
+      name: `BDC API ${method} ${endpoint}`,
+      op: 'http.client',
+      attributes: {
+        'http.method': method,
+        'api.endpoint': endpoint,
+        'api.client': 'supabase-functions',
+      }
+    }, async (span) => {
+      try {
+        let functionName: string;
+        let functionOptions: any = {};
 
-      // For GET requests with query parameters, append them to the function path
-      if (method === 'GET' && params) {
-        const searchParams = new URLSearchParams();
-        Object.entries(params).forEach(([key, value]) => {
-          if (value !== undefined && value !== null) {
-            searchParams.append(key, value.toString());
+        // For GET requests with query parameters, append them to the function path
+        if (method === 'GET' && params) {
+          const searchParams = new URLSearchParams();
+          Object.entries(params).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+              searchParams.append(key, value.toString());
+            }
+          });
+          functionName = `bdc-api${endpoint}?${searchParams.toString()}`;
+        } else {
+          functionName = `bdc-api${endpoint}`;
+        }
+
+        // Set up function options
+        if (method === 'POST' && body) {
+          functionOptions.body = body;
+        }
+
+        span.setAttributes({
+          'supabase.function': functionName,
+          'api.params_count': params ? Object.keys(params).length : 0,
+        });
+
+        const { data, error } = await supabase.functions.invoke(functionName, functionOptions);
+
+        if (error) {
+          const apiError = new BDCApiError(error.message || 'API request failed', 500, error);
+          
+          // Capture API errors in Sentry
+          Sentry.captureException(apiError, {
+            contexts: {
+              api: {
+                endpoint,
+                method,
+                functionName,
+                error: error.message,
+              }
+            }
+          });
+          
+          span.setStatus({ code: 2, message: 'Error' });
+          throw apiError;
+        }
+
+        span.setStatus({ code: 1, message: 'OK' });
+        return data as T;
+      } catch (error) {
+        span.setStatus({ code: 2, message: 'Error' });
+        
+        if (error instanceof BDCApiError) {
+          throw error;
+        }
+        
+        const apiError = new BDCApiError(
+          error instanceof Error ? error.message : 'Unknown error occurred',
+          500,
+          error
+        );
+        
+        // Capture unexpected errors
+        Sentry.captureException(apiError, {
+          contexts: {
+            api: {
+              endpoint,
+              method,
+              originalError: error instanceof Error ? error.message : String(error),
+            }
           }
         });
-        functionName = `bdc-api${endpoint}?${searchParams.toString()}`;
-      } else {
-        functionName = `bdc-api${endpoint}`;
+        
+        throw apiError;
       }
-
-      // Set up function options
-      if (method === 'POST' && body) {
-        functionOptions.body = body;
-      }
-
-      const { data, error } = await supabase.functions.invoke(functionName, functionOptions);
-
-      if (error) {
-        throw new BDCApiError(error.message || 'API request failed', 500, error);
-      }
-
-      return data as T;
-    } catch (error) {
-      if (error instanceof BDCApiError) {
-        throw error;
-      }
-      throw new BDCApiError(
-        error instanceof Error ? error.message : 'Unknown error occurred',
-        500,
-        error
-      );
-    }
+    });
   }
 
   /**

@@ -1,6 +1,32 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import * as Sentry from 'https://deno.land/x/sentry@7.81.1/index.ts';
+
+// Initialize Sentry for Deno Edge Function
+const sentryDsn = Deno.env.get('SENTRY_DSN_EDGE');
+if (sentryDsn && !sentryDsn.includes('your-sentry-dsn')) {
+  Sentry.init({
+    dsn: sentryDsn,
+    environment: Deno.env.get('ENVIRONMENT') || 'production',
+    serverName: 'bdc-api-edge-function',
+    beforeSend(event) {
+      // Add function context
+      event.contexts = {
+        ...event.contexts,
+        runtime: {
+          name: 'deno',
+          version: Deno.version.deno,
+        },
+        function: {
+          name: 'bdc-api',
+          type: 'edge-function',
+        }
+      };
+      return event;
+    }
+  });
+}
 
 // CORS headers
 const corsHeaders = {
@@ -18,49 +44,101 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // Start Sentry transaction for the entire request
+  const transaction = sentryDsn ? Sentry.startTransaction({
+    name: `BDC API ${req.method} ${new URL(req.url).pathname}`,
+    op: 'http.server',
+    tags: {
+      'http.method': req.method,
+      'function.name': 'bdc-api',
+    }
+  }) : null;
+
   try {
     const url = new URL(req.url);
     const path = url.pathname.replace('/functions/v1/bdc-api', '');
+    
+    // Add request context to Sentry
+    if (sentryDsn) {
+      Sentry.setContext('request', {
+        url: req.url,
+        method: req.method,
+        path,
+        userAgent: req.headers.get('user-agent'),
+      });
+    }
     
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    // Route requests based on path and method
+    let response: Response;
+
+    // Route requests based on path and method with Sentry spans
     if (req.method === 'GET' && path === '/investments') {
-      return await searchInvestments(supabase, url.searchParams);
-    }
-    
-    if (req.method === 'GET' && path.startsWith('/marks/')) {
+      response = sentryDsn ? await Sentry.startSpan({ name: 'searchInvestments', op: 'db.query' }, async () => {
+        return await searchInvestments(supabase, url.searchParams);
+      }) : await searchInvestments(supabase, url.searchParams);
+    } else if (req.method === 'GET' && path.startsWith('/marks/')) {
       const rawId = path.split('/')[2];
-      return await getMarkHistory(supabase, rawId);
-    }
-    
-    if (req.method === 'GET' && path === '/nonaccruals') {
-      return await listNonAccruals(supabase, url.searchParams);
-    }
-    
-    if (req.method === 'POST' && path === '/export') {
+      if (sentryDsn) Sentry.setTag('investment.rawId', rawId);
+      response = sentryDsn ? await Sentry.startSpan({ name: 'getMarkHistory', op: 'db.query' }, async () => {
+        return await getMarkHistory(supabase, rawId);
+      }) : await getMarkHistory(supabase, rawId);
+    } else if (req.method === 'GET' && path === '/nonaccruals') {
+      response = sentryDsn ? await Sentry.startSpan({ name: 'listNonAccruals', op: 'db.query' }, async () => {
+        return await listNonAccruals(supabase, url.searchParams);
+      }) : await listNonAccruals(supabase, url.searchParams);
+    } else if (req.method === 'POST' && path === '/export') {
       const body = await req.json();
-      return await exportToExcel(supabase, body);
-    }
-    
-    if (req.method === 'POST' && path === '/cache/invalidate') {
-      return await invalidateCache();
+      if (sentryDsn) Sentry.setContext('export', { filters: body });
+      response = sentryDsn ? await Sentry.startSpan({ name: 'exportToExcel', op: 'db.query' }, async () => {
+        return await exportToExcel(supabase, body);
+      }) : await exportToExcel(supabase, body);
+    } else if (req.method === 'POST' && path === '/cache/invalidate') {
+      response = sentryDsn ? await Sentry.startSpan({ name: 'invalidateCache', op: 'cache.clear' }, async () => {
+        return await invalidateCache();
+      }) : await invalidateCache();
+    } else {
+      response = new Response(JSON.stringify({ error: 'Not found' }), {
+        status: 404,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
 
-    return new Response(JSON.stringify({ error: 'Not found' }), {
-      status: 404,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    if (transaction) {
+      transaction.setStatus('ok');
+      transaction.setHttpStatus(response.status);
+    }
+    return response;
 
   } catch (error) {
     console.error('Error in bdc-api:', error);
-    return new Response(JSON.stringify({ error: error.message }), {
+    
+    // Capture error in Sentry
+    if (sentryDsn) {
+      Sentry.captureException(error, {
+        contexts: {
+          request: {
+            url: req.url,
+            method: req.method,
+          }
+        }
+      });
+    }
+
+    if (transaction) transaction.setStatus('internal_error');
+    
+    return new Response(JSON.stringify({ 
+      error: error.message,
+      timestamp: new Date().toISOString()
+    }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
+  } finally {
+    if (transaction) transaction.finish();
   }
 });
 
