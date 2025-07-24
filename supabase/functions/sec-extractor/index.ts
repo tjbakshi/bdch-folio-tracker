@@ -47,7 +47,7 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    const { action, ticker, years_back } = await req.json();
+    const { action, ticker, yearsBack, years_back, filing_id, filing_type } = await req.json();
 
     console.log(`Processing action: ${action} for ticker: ${ticker || 'all'}`);
 
@@ -56,17 +56,15 @@ Deno.serve(async (req) => {
         return await backfillAllBDCs(supabase);
       
       case 'backfill_ticker':
-        return await backfillTicker(supabase, ticker, years_back || 9);
+        return await backfillTicker(supabase, ticker, yearsBack || years_back || 3);
       
       case 'extract_filing':
-        const { filing_id } = await req.json();
         return await extractFiling(supabase, filing_id);
       
       case 'incremental_check':
-        const { filing_type } = await req.json();
         return await incrementalFilingCheck(supabase, ticker, filing_type);
       
-      case 'setup_schedules':
+      case 'setup_scheduled_jobs':
         return await setupScheduledJobs(supabase);
       
       default:
