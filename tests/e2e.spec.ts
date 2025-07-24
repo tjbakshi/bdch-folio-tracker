@@ -68,6 +68,7 @@ test.describe('BDC Analytics Application', () => {
     // Wait for success toast to appear
     const backfillToast = page.locator('text=/started backfill/i', { strict: false }).first();
     await expect(backfillToast).toBeVisible({ timeout: 15000 });
+    await expect(backfillToast).toBeHidden({ timeout: 10000 });
     
     // Verify at least one log entry appears in recent logs
     const logsSection = page.getByTestId('processing-logs');
@@ -127,9 +128,19 @@ test.describe('BDC Analytics Application', () => {
       r.url().includes('/bdc-api/investments') && r.status() === 200
     );
     
-    // Apply manager filter using role-based selector
-    const managerSelect = page.getByRole('combobox', { name: /manager/i });
-    await managerSelect.waitFor({ state: 'visible' });
+    // Apply manager filter - try both role and testid selectors
+    const managerSelectRole = page.getByRole('combobox', { name: /manager/i });
+    const managerSelectTestId = page.getByTestId('manager-filter');
+
+    // Try role selector first, fall back to testid
+    let managerSelect;
+    if (await managerSelectRole.isVisible({ timeout: 5000 }).catch(() => false)) {
+      managerSelect = managerSelectRole;
+    } else {
+      managerSelect = managerSelectTestId;
+      await expect(managerSelect).toBeVisible();
+    }
+
     await managerSelect.click();
     
     // Select ARCC (or first available option)
@@ -190,9 +201,19 @@ test.describe('BDC Analytics Application', () => {
     // Clear search
     await searchInput.clear();
     
-    // Test tranche filter using role-based selector
-    const trancheSelect = page.getByRole('combobox', { name: /tranche/i });
-    await trancheSelect.waitFor({ state: 'visible' });
+    // Test tranche filter - try both role and testid selectors
+    const trancheSelectRole = page.getByRole('combobox', { name: /tranche/i });
+    const trancheSelectTestId = page.getByTestId('tranche-filter');
+
+    // Try role selector first, fall back to testid
+    let trancheSelect;
+    if (await trancheSelectRole.isVisible({ timeout: 5000 }).catch(() => false)) {
+      trancheSelect = trancheSelectRole;
+    } else {
+      trancheSelect = trancheSelectTestId;
+      await expect(trancheSelect).toBeVisible();
+    }
+
     await trancheSelect.click();
     
     // Select First Lien
@@ -285,6 +306,7 @@ test.describe('BDC Analytics Application', () => {
     // Wait for success toast
     const jobsToast = page.locator('text=/scheduled jobs setup/i', { strict: false }).first();
     await expect(jobsToast).toBeVisible({ timeout: 15000 });
+    await expect(jobsToast).toBeHidden({ timeout: 10000 });
     
     // Verify scheduled jobs table shows entries
     const jobsTable = page.getByTestId('scheduled-jobs-table');
@@ -300,8 +322,8 @@ test.describe('BDC Analytics Application', () => {
     // Test navigation to non-existent page
     await page.goto('/non-existent-page');
     
-    // Should show 404 page or stay on non-existent URL
-    await expect(page.getByRole('heading', { name: /404/i }).or(page.locator('body'))).toBeVisible({ timeout: 5000 });
+    // Should show 404 page 
+    await expect(page.getByRole('heading', { name: /404/i })).toBeVisible({ timeout: 5000 });
     
     // Navigate back to dashboard
     await page.goto('/');
@@ -415,9 +437,18 @@ test.describe('BDC Analytics Application', () => {
     const totalAssetsCard = page.getByTestId('total-assets-card');
     await expect(totalAssetsCard).toBeVisible();
     
-    // Test that filtering still works with POST using role-based selector
-    const managerSelect = page.getByRole('combobox', { name: /manager/i });
-    await managerSelect.waitFor({ state: 'visible' });
+    // Test that filtering still works with POST - try both selectors
+    const managerSelectRole = page.getByRole('combobox', { name: /manager/i });
+    const managerSelectTestId = page.getByTestId('manager-filter');
+
+    let managerSelect;
+    if (await managerSelectRole.isVisible({ timeout: 5000 }).catch(() => false)) {
+      managerSelect = managerSelectRole;
+    } else {
+      managerSelect = managerSelectTestId;
+      await expect(managerSelect).toBeVisible();
+    }
+
     await managerSelect.click();
     
     // Select "All Managers" to trigger a new POST request
