@@ -1,7 +1,7 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import * as Sentry from 'https://esm.sh/@sentry/serverless-deno@8.0.0';
+import * as Sentry from "https://deno.land/x/sentry_serverless_deno@0.1.1/mod.ts";
 
 // Initialize Sentry for Edge Function monitoring
 const sentryDsn = Deno.env.get('SENTRY_DSN_EDGE');
@@ -38,110 +38,108 @@ const corsHeaders = {
 /**
  * BDC API Edge Function - provides REST endpoints for dashboard and export functionality
  */
-serve(async (req) => {
+serve(Sentry.withSentry(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   // Start Sentry transaction for the entire request
-  return await Sentry.withSentry(async () => {
-    const transaction = Sentry.startTransaction({
-      name: `BDC API ${req.method} ${new URL(req.url).pathname}`,
-      op: 'http.server',
-      tags: {
-        'http.method': req.method,
-        'function.name': 'bdc-api',
+  const transaction = Sentry.startTransaction({
+    name: `BDC API ${req.method} ${new URL(req.url).pathname}`,
+    op: 'http.server',
+    tags: {
+      'http.method': req.method,
+      'function.name': 'bdc-api',
+    }
+  });
+
+  try {
+    const url = new URL(req.url);
+    const path = url.pathname.replace('/functions/v1/bdc-api', '');
+    
+    // Add request context to Sentry
+    Sentry.setContext('request', {
+      url: req.url,
+      method: req.method,
+      path,
+      userAgent: req.headers.get('user-agent'),
+    });
+    
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    );
+
+    let response: Response;
+
+    // Route requests with individual Sentry spans
+    if (req.method === 'GET' && path === '/investments') {
+      response = await Sentry.startSpan(
+        { name: 'searchInvestments', op: 'db.query' },
+        async () => await searchInvestments(supabase, url.searchParams)
+      );
+    } else if (req.method === 'GET' && path.startsWith('/marks/')) {
+      const rawId = path.split('/')[2];
+      Sentry.setTag('investment.rawId', rawId);
+      response = await Sentry.startSpan(
+        { name: 'getMarkHistory', op: 'db.query' },
+        async () => await getMarkHistory(supabase, rawId)
+      );
+    } else if (req.method === 'GET' && path === '/nonaccruals') {
+      response = await Sentry.startSpan(
+        { name: 'listNonAccruals', op: 'db.query' },
+        async () => await listNonAccruals(supabase, url.searchParams)
+      );
+    } else if (req.method === 'POST' && path === '/export') {
+      const body = await req.json();
+      Sentry.setContext('export', { filters: body });
+      response = await Sentry.startSpan(
+        { name: 'exportToExcel', op: 'db.query' },
+        async () => await exportToExcel(supabase, body)
+      );
+    } else if (req.method === 'POST' && path === '/cache/invalidate') {
+      response = await Sentry.startSpan(
+        { name: 'invalidateCache', op: 'cache.clear' },
+        async () => await invalidateCache()
+      );
+    } else {
+      response = new Response(JSON.stringify({ error: 'Not found' }), {
+        status: 404,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    transaction.setStatus('ok');
+    transaction.setHttpStatus(response.status);
+    return response;
+
+  } catch (error) {
+    console.error('Error in bdc-api:', error);
+    
+    // Capture error in Sentry with context
+    Sentry.captureException(error, {
+      contexts: {
+        request: {
+          url: req.url,
+          method: req.method,
+        }
       }
     });
 
-    try {
-      const url = new URL(req.url);
-      const path = url.pathname.replace('/functions/v1/bdc-api', '');
-      
-      // Add request context to Sentry
-      Sentry.setContext('request', {
-        url: req.url,
-        method: req.method,
-        path,
-        userAgent: req.headers.get('user-agent'),
-      });
-      
-      const supabase = createClient(
-        Deno.env.get('SUPABASE_URL') ?? '',
-        Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-      );
-
-      let response: Response;
-
-      // Route requests with individual Sentry spans
-      if (req.method === 'GET' && path === '/investments') {
-        response = await Sentry.startSpan(
-          { name: 'searchInvestments', op: 'db.query' },
-          async () => await searchInvestments(supabase, url.searchParams)
-        );
-      } else if (req.method === 'GET' && path.startsWith('/marks/')) {
-        const rawId = path.split('/')[2];
-        Sentry.setTag('investment.rawId', rawId);
-        response = await Sentry.startSpan(
-          { name: 'getMarkHistory', op: 'db.query' },
-          async () => await getMarkHistory(supabase, rawId)
-        );
-      } else if (req.method === 'GET' && path === '/nonaccruals') {
-        response = await Sentry.startSpan(
-          { name: 'listNonAccruals', op: 'db.query' },
-          async () => await listNonAccruals(supabase, url.searchParams)
-        );
-      } else if (req.method === 'POST' && path === '/export') {
-        const body = await req.json();
-        Sentry.setContext('export', { filters: body });
-        response = await Sentry.startSpan(
-          { name: 'exportToExcel', op: 'db.query' },
-          async () => await exportToExcel(supabase, body)
-        );
-      } else if (req.method === 'POST' && path === '/cache/invalidate') {
-        response = await Sentry.startSpan(
-          { name: 'invalidateCache', op: 'cache.clear' },
-          async () => await invalidateCache()
-        );
-      } else {
-        response = new Response(JSON.stringify({ error: 'Not found' }), {
-          status: 404,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-      }
-
-      transaction.setStatus('ok');
-      transaction.setHttpStatus(response.status);
-      return response;
-
-    } catch (error) {
-      console.error('Error in bdc-api:', error);
-      
-      // Capture error in Sentry with context
-      Sentry.captureException(error, {
-        contexts: {
-          request: {
-            url: req.url,
-            method: req.method,
-          }
-        }
-      });
-
-      transaction.setStatus('internal_error');
-      
-      return new Response(JSON.stringify({ 
-        error: error.message,
-        timestamp: new Date().toISOString()
-      }), {
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    } finally {
-      transaction.finish();
-    }
-  });
-});
+    transaction.setStatus('internal_error');
+    
+    return new Response(JSON.stringify({ 
+      error: error.message,
+      timestamp: new Date().toISOString()
+    }), {
+      status: 500,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  } finally {
+    transaction.finish();
+  }
+}));
 
 /**
  * Search investments with filters and pagination

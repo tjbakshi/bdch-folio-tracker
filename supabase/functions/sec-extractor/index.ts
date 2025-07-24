@@ -2,6 +2,25 @@ import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import * as cheerio from 'https://esm.sh/cheerio@1.0.0-rc.12';
+import * as Sentry from "https://deno.land/x/sentry_serverless_deno@0.1.1/mod.ts";
+
+// Initialize Sentry for SEC Extractor
+const sentryDsn = Deno.env.get('SENTRY_DSN_EDGE');
+if (sentryDsn && !sentryDsn.includes('your-sentry-dsn')) {
+  Sentry.init({
+    dsn: sentryDsn,
+    environment: Deno.env.get('ENVIRONMENT') || 'production',
+    tracesSampleRate: 1.0,
+    beforeSend(event) {
+      event.contexts = {
+        ...event.contexts,
+        runtime: { name: 'deno', version: Deno.version.deno },
+        function: { name: 'sec-extractor', type: 'supabase-edge-function' }
+      };
+      return event;
+    }
+  });
+}
 // Note: Removing Sentry import to fix deployment issue
 // import * as Sentry from 'https://deno.land/x/sentry@7.81.1/index.ts';
 
