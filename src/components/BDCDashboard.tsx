@@ -1,51 +1,156 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { useState, useEffect } from "react";
+import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Search, Download, TrendingUp, TrendingDown, Filter, Calendar } from "lucide-react";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useToast } from "@/hooks/use-toast";
+import { TrendingDown, TrendingUp, DollarSign, AlertTriangle, Download, Search, Calendar } from "lucide-react";
 
-const BDCDashboard = () => {
-  // Mock data for demonstration
-  const portfolioSummary = {
-    totalAssets: 247,
-    totalValue: 2850000000,
-    avgMark: 0.87,
-    nonAccrualCount: 12
+interface Investment {
+  id: string;
+  company_name: string;
+  business_description: string;
+  investment_tranche: string;
+  principal_amount: number;
+  fair_value: number;
+  filings: {
+    ticker: string;
+    filing_date: string;
+    filing_type: string;
+  };
+  investments_computed: Array<{
+    mark: number;
+    is_non_accrual: boolean;
+    quarter_year: string;
+  }>;
+}
+
+interface PortfolioSummary {
+  totalAssets: number;
+  totalValue: number;
+  averageMark: number;
+  nonAccrualAssets: number;
+}
+
+export default function BDCDashboard() {
+  const [investments, setInvestments] = useState<Investment[]>([]);
+  const [summary, setSummary] = useState<PortfolioSummary>({
+    totalAssets: 0,
+    totalValue: 0,
+    averageMark: 0,
+    nonAccrualAssets: 0
+  });
+  const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [selectedManager, setSelectedManager] = useState("");
+  const [selectedTranche, setSelectedTranche] = useState("");
+  const [managers, setManagers] = useState<string[]>([]);
+  const { toast } = useToast();
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  const fetchData = async () => {
+    try {
+      setLoading(true);
+      
+      // Fetch recent investments
+      const { data, error } = await supabase.functions.invoke('bdc-api', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (error) throw error;
+
+      const investmentData = data?.data || [];
+      setInvestments(investmentData);
+
+      // Calculate portfolio summary
+      const totalAssets = investmentData.reduce((sum: number, inv: Investment) => 
+        sum + (inv.principal_amount || 0), 0);
+      
+      const totalValue = investmentData.reduce((sum: number, inv: Investment) => 
+        sum + (inv.fair_value || 0), 0);
+      
+      const marks = investmentData
+        .map((inv: Investment) => inv.investments_computed?.[0]?.mark)
+        .filter((mark: number) => mark != null);
+      
+      const averageMark = marks.length > 0 
+        ? marks.reduce((sum: number, mark: number) => sum + mark, 0) / marks.length 
+        : 0;
+
+      const nonAccrualAssets = investmentData
+        .filter((inv: Investment) => inv.investments_computed?.[0]?.is_non_accrual)
+        .reduce((sum: number, inv: Investment) => sum + (inv.principal_amount || 0), 0);
+
+      setSummary({
+        totalAssets,
+        totalValue,
+        averageMark,
+        nonAccrualAssets
+      });
+
+      // Get unique managers
+      const uniqueManagers = [...new Set(investmentData.map((inv: Investment) => inv.filings?.ticker).filter(Boolean))] as string[];
+      setManagers(uniqueManagers);
+
+    } catch (error) {
+      console.error('Error fetching data:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load dashboard data",
+        variant: "destructive"
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const recentHoldings = [
-    {
-      company: "Acme Industries LLC",
-      manager: "Ares Capital Corp",
-      tranche: "First Lien",
-      principal: 45000000,
-      fairValue: 39150000,
-      mark: 0.87,
-      quarter: "Q3 2024",
-      nonAccrual: false
-    },
-    {
-      company: "Beta Corp",
-      manager: "Blackstone Secured Lending",
-      tranche: "Second Lien",
-      principal: 25000000,
-      fairValue: 18750000,
-      mark: 0.75,
-      quarter: "Q3 2024",
-      nonAccrual: true
-    },
-    {
-      company: "Gamma Tech Solutions",
-      manager: "Blue Owl Capital",
-      tranche: "Equity",
-      principal: 15000000,
-      fairValue: 18000000,
-      mark: 1.20,
-      quarter: "Q3 2024",
-      nonAccrual: false
+  const handleExport = async () => {
+    try {
+      const filters = {
+        company: searchTerm || undefined,
+        manager: selectedManager || undefined,
+        tranche: selectedTranche || undefined
+      };
+
+      const response = await supabase.functions.invoke('bdc-api', {
+        method: 'POST',
+        body: filters
+      });
+
+      if (response.error) throw response.error;
+
+      // Create download link
+      const blob = new Blob([response.data], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `bdc-investments-${new Date().toISOString().split('T')[0]}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+
+      toast({
+        title: "Success",
+        description: "Export downloaded successfully"
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to export data",
+        variant: "destructive"
+      });
     }
-  ];
+  };
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-US', {
@@ -57,201 +162,247 @@ const BDCDashboard = () => {
   };
 
   const formatMark = (mark: number) => {
-    return (mark * 100).toFixed(1) + '%';
+    return `${(mark * 100).toFixed(1)}%`;
   };
 
   const getMarkColor = (mark: number) => {
-    if (mark >= 1.0) return 'text-success';
-    if (mark >= 0.9) return 'text-foreground';
-    if (mark >= 0.8) return 'text-warning';
-    return 'text-destructive';
+    if (mark >= 1.0) return "text-green-600";
+    if (mark >= 0.9) return "text-yellow-600";
+    return "text-red-600";
   };
 
   const getMarkIcon = (mark: number) => {
-    return mark >= 1.0 ? TrendingUp : TrendingDown;
+    if (mark >= 1.0) return <TrendingUp className="w-4 h-4 text-green-600" />;
+    return <TrendingDown className="w-4 h-4 text-red-600" />;
   };
 
+  const filteredInvestments = investments.filter(investment => {
+    const matchesSearch = !searchTerm || 
+      investment.company_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      investment.business_description?.toLowerCase().includes(searchTerm.toLowerCase());
+    
+    const matchesManager = !selectedManager || investment.filings?.ticker === selectedManager;
+    const matchesTranche = !selectedTranche || investment.investment_tranche?.includes(selectedTranche);
+    
+    return matchesSearch && matchesManager && matchesTranche;
+  });
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center p-8">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+          <p>Loading dashboard data...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-background">
+    <div className="p-6 space-y-6">
       {/* Header */}
-      <div className="border-b bg-card">
-        <div className="container mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold text-foreground">BDC Portfolio Analytics</h1>
-              <p className="text-muted-foreground">Track and analyze Business Development Company investments</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold">BDC Investment Dashboard</h1>
+          <p className="text-muted-foreground">Portfolio analytics and holdings overview</p>
+        </div>
+        <div className="flex items-center space-x-2">
+          <Button onClick={handleExport} variant="outline">
+            <Download className="w-4 h-4 mr-2" />
+            Export Data
+          </Button>
+          <Button variant="outline">
+            <Calendar className="w-4 h-4 mr-2" />
+            Q4 2024
+          </Button>
+        </div>
+      </div>
+
+      {/* Summary Cards */}
+      <div className="grid gap-6 md:grid-cols-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total Assets</CardTitle>
+            <DollarSign className="w-4 h-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{formatCurrency(summary.totalAssets)}</div>
+            <p className="text-xs text-muted-foreground">
+              Principal amount across all positions
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total Value</CardTitle>
+            <TrendingUp className="w-4 h-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{formatCurrency(summary.totalValue)}</div>
+            <p className="text-xs text-muted-foreground">
+              Fair value of all holdings
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Average Mark</CardTitle>
+            <div className="flex items-center">
+              {getMarkIcon(summary.averageMark)}
             </div>
-            <div className="flex items-center gap-3">
-              <Button variant="outline" size="sm">
-                <Calendar className="h-4 w-4 mr-2" />
-                Q3 2024
-              </Button>
-              <Button variant="outline" size="sm">
-                <Download className="h-4 w-4 mr-2" />
-                Export
-              </Button>
+          </CardHeader>
+          <CardContent>
+            <div className={`text-2xl font-bold ${getMarkColor(summary.averageMark)}`}>
+              {formatMark(summary.averageMark)}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Weighted average across portfolio
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Non-Accrual Assets</CardTitle>
+            <AlertTriangle className="w-4 h-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-red-600">{formatCurrency(summary.nonAccrualAssets)}</div>
+            <p className="text-xs text-muted-foreground">
+              Assets not accruing interest
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Search and Filters */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Search & Filter</CardTitle>
+          <CardDescription>Filter investments by various criteria</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col md:flex-row gap-4">
+            <div className="flex-1">
+              <div className="relative">
+                <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search companies or descriptions..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+            </div>
+            <div className="w-full md:w-48">
+              <Select value={selectedManager} onValueChange={setSelectedManager}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select Manager" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">All Managers</SelectItem>
+                  {managers.map((manager) => (
+                    <SelectItem key={manager} value={manager}>
+                      {manager}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="w-full md:w-48">
+              <Select value={selectedTranche} onValueChange={setSelectedTranche}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select Tranche" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">All Tranches</SelectItem>
+                  <SelectItem value="First Lien">First Lien</SelectItem>
+                  <SelectItem value="Second Lien">Second Lien</SelectItem>
+                  <SelectItem value="Equity">Equity</SelectItem>
+                  <SelectItem value="Subordinated">Subordinated</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
-        </div>
-      </div>
+        </CardContent>
+      </Card>
 
-      <div className="container mx-auto px-6 py-6">
-        {/* Summary Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Total Assets</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{portfolioSummary.totalAssets}</div>
-              <p className="text-xs text-muted-foreground mt-1">Across all BDCs</p>
-            </CardContent>
-          </Card>
+      {/* Recent Holdings Table */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Recent Holdings</CardTitle>
+          <CardDescription>
+            Latest investment holdings across all BDC managers ({filteredInvestments.length} shown)
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Company</TableHead>
+                <TableHead>Manager</TableHead>
+                <TableHead>Tranche</TableHead>
+                <TableHead className="text-right">Principal</TableHead>
+                <TableHead className="text-right">Fair Value</TableHead>
+                <TableHead className="text-right">Mark</TableHead>
+                <TableHead>Status</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredInvestments.slice(0, 50).map((investment) => {
+                const computed = investment.investments_computed?.[0];
+                const mark = computed?.mark || 0;
+                const isNonAccrual = computed?.is_non_accrual || false;
 
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Total Value</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{formatCurrency(portfolioSummary.totalValue)}</div>
-              <p className="text-xs text-muted-foreground mt-1">Fair value across portfolio</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Average Mark</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className={`text-2xl font-bold ${getMarkColor(portfolioSummary.avgMark)}`}>
-                {formatMark(portfolioSummary.avgMark)}
-              </div>
-              <p className="text-xs text-muted-foreground mt-1">Portfolio-wide average</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Non-Accrual Assets</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-warning">{portfolioSummary.nonAccrualCount}</div>
-              <p className="text-xs text-muted-foreground mt-1">Requiring attention</p>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Search and Filters */}
-        <Card className="mb-6">
-          <CardHeader>
-            <CardTitle className="text-lg">Search & Filter Portfolio</CardTitle>
-            <CardDescription>Find specific investments and apply filters</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-col md:flex-row gap-4">
-              <div className="flex-1">
-                <div className="relative">
-                  <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                  <Input 
-                    placeholder="Search by company name, description, or manager..." 
-                    className="pl-10"
-                  />
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <Select>
-                  <SelectTrigger className="w-[180px]">
-                    <SelectValue placeholder="BDC Manager" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ares">Ares Capital Corp</SelectItem>
-                    <SelectItem value="blackstone">Blackstone Secured Lending</SelectItem>
-                    <SelectItem value="blueowl">Blue Owl Capital</SelectItem>
-                  </SelectContent>
-                </Select>
-                
-                <Select>
-                  <SelectTrigger className="w-[150px]">
-                    <SelectValue placeholder="Tranche" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="first">First Lien</SelectItem>
-                    <SelectItem value="second">Second Lien</SelectItem>
-                    <SelectItem value="equity">Equity</SelectItem>
-                  </SelectContent>
-                </Select>
-                
-                <Button variant="outline" size="icon">
-                  <Filter className="h-4 w-4" />
-                </Button>
-              </div>
+                return (
+                  <TableRow key={investment.id}>
+                    <TableCell>
+                      <div>
+                        <div className="font-medium">{investment.company_name}</div>
+                        <div className="text-sm text-muted-foreground truncate max-w-xs">
+                          {investment.business_description}
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline">{investment.filings?.ticker}</Badge>
+                    </TableCell>
+                    <TableCell>
+                      <span className="text-sm">{investment.investment_tranche}</span>
+                    </TableCell>
+                    <TableCell className="text-right font-mono">
+                      {formatCurrency(investment.principal_amount || 0)}
+                    </TableCell>
+                    <TableCell className="text-right font-mono">
+                      {formatCurrency(investment.fair_value || 0)}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className={`flex items-center justify-end space-x-1 ${getMarkColor(mark)}`}>
+                        {getMarkIcon(mark)}
+                        <span className="font-mono">{formatMark(mark)}</span>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      {isNonAccrual ? (
+                        <Badge variant="destructive">Non-Accrual</Badge>
+                      ) : (
+                        <Badge variant="default">Accruing</Badge>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+          {filteredInvestments.length === 0 && (
+            <div className="text-center py-8 text-muted-foreground">
+              No investments found matching your criteria
             </div>
-          </CardContent>
-        </Card>
-
-        {/* Portfolio Holdings Table */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Recent Holdings</CardTitle>
-            <CardDescription>Latest portfolio positions and marks</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b">
-                    <th className="text-left py-3 px-4 font-medium text-muted-foreground">Company</th>
-                    <th className="text-left py-3 px-4 font-medium text-muted-foreground">Manager</th>
-                    <th className="text-left py-3 px-4 font-medium text-muted-foreground">Tranche</th>
-                    <th className="text-right py-3 px-4 font-medium text-muted-foreground">Principal</th>
-                    <th className="text-right py-3 px-4 font-medium text-muted-foreground">Fair Value</th>
-                    <th className="text-right py-3 px-4 font-medium text-muted-foreground">Mark</th>
-                    <th className="text-center py-3 px-4 font-medium text-muted-foreground">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {recentHoldings.map((holding, index) => {
-                    const MarkIcon = getMarkIcon(holding.mark);
-                    return (
-                      <tr key={index} className="border-b hover:bg-muted/50 transition-colors">
-                        <td className="py-4 px-4">
-                          <div className="font-medium">{holding.company}</div>
-                          <div className="text-xs text-muted-foreground">{holding.quarter}</div>
-                        </td>
-                        <td className="py-4 px-4 text-sm">{holding.manager}</td>
-                        <td className="py-4 px-4">
-                          <Badge variant="outline" className="text-xs">{holding.tranche}</Badge>
-                        </td>
-                        <td className="py-4 px-4 text-right font-mono">
-                          {formatCurrency(holding.principal)}
-                        </td>
-                        <td className="py-4 px-4 text-right font-mono">
-                          {formatCurrency(holding.fairValue)}
-                        </td>
-                        <td className="py-4 px-4 text-right">
-                          <div className={`flex items-center justify-end gap-1 ${getMarkColor(holding.mark)}`}>
-                            <MarkIcon className="h-3 w-3" />
-                            <span className="font-mono">{formatMark(holding.mark)}</span>
-                          </div>
-                        </td>
-                        <td className="py-4 px-4 text-center">
-                          {holding.nonAccrual ? (
-                            <Badge variant="destructive" className="text-xs">Non-Accrual</Badge>
-                          ) : (
-                            <Badge variant="secondary" className="text-xs">Performing</Badge>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
-};
-
-export default BDCDashboard;
+}
