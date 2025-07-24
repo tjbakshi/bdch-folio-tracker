@@ -66,9 +66,7 @@ test.describe('BDC Analytics Application', () => {
     await backfillButton.click();
     
     // Wait for success toast to appear
-    const backfillToast = page.locator('text=/started backfill/i', { strict: false }).first();
-    await expect(backfillToast).toBeVisible({ timeout: 15000 });
-    await expect(backfillToast).toBeHidden({ timeout: 10000 });
+    await waitForToast(page, /started backfill/i);
     
     // Verify at least one log entry appears in recent logs
     const logsSection = page.getByTestId('processing-logs');
@@ -270,9 +268,7 @@ test.describe('BDC Analytics Application', () => {
     await page.waitForURL('**/docs.html', { timeout: 10000 });
     
     // Verify Swagger UI elements are present
-    await expect(
-      page.locator('section.swagger-ui.swagger-container')
-    ).toBeVisible({ timeout: 20000 });
+    await expect(page.locator('section.swagger-ui').first()).toBeVisible({ timeout: 15000 });
     
     // Verify custom header is present
     await expect(page.getByRole('heading', { name: 'BDC Investment Analytics API' })).toBeVisible();
@@ -304,9 +300,7 @@ test.describe('BDC Analytics Application', () => {
     await setupJobsButton.click({ force: true });
     
     // Wait for success toast
-    const jobsToast = page.locator('text=/scheduled jobs setup/i', { strict: false }).first();
-    await expect(jobsToast).toBeVisible({ timeout: 15000 });
-    await expect(jobsToast).toBeHidden({ timeout: 10000 });
+    await waitForToast(page, /scheduled jobs setup/i);
     
     // Verify scheduled jobs table shows entries
     const jobsTable = page.getByTestId('scheduled-jobs-table');
