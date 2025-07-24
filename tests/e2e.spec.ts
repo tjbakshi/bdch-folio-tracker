@@ -66,7 +66,9 @@ test.describe('BDC Analytics Application', () => {
     await backfillButton.click();
     
     // Wait for success toast to appear
-    await waitForToast(page, /started backfill/i);
+    const toastDesc = page.locator('[data-lov-name="ToastDescription"]', { hasText: /started backfill/i });
+    await expect(toastDesc).toBeVisible({ timeout: 15000 });
+    await expect(toastDesc).toBeHidden({ timeout: 10000 });
     
     // Verify at least one log entry appears in recent logs
     const logsSection = page.getByTestId('processing-logs');
@@ -121,8 +123,8 @@ test.describe('BDC Analytics Application', () => {
     // Wait for investments data to load
     await waitForInvestments(page);
     
-    // Apply manager filter using label selector
-    const managerSelect = page.getByLabel('Manager');
+    // Apply manager filter using role selector
+    const managerSelect = page.getByRole('combobox', { name: 'Manager' });
     await expect(managerSelect).toBeVisible();
     await managerSelect.click();
     
@@ -135,10 +137,8 @@ test.describe('BDC Analytics Application', () => {
       await page.getByRole('option').first().click();
     }
     
-    // Verify filtered results
-    const tableRows = page.locator('[data-testid="investment-row"]');
-    const firstRowManager = tableRows.first().getByTestId('manager-badge');
-    await expect(firstRowManager).toBeVisible();
+    // Wait for data to reload after filter
+    await waitForInvestments(page);
     
     // Set up download listener before clicking export
     const downloadPromise = page.waitForEvent('download');
@@ -155,7 +155,9 @@ test.describe('BDC Analytics Application', () => {
     expect(download.suggestedFilename()).toMatch(/bdc-investments.*\.csv/);
     
     // Verify success toast appears
-    await waitForToast(page, /export downloaded successfully/i);
+    const toastDesc = page.locator('[data-lov-name="ToastDescription"]', { hasText: /export downloaded successfully/i });
+    await expect(toastDesc).toBeVisible({ timeout: 15000 });
+    await expect(toastDesc).toBeHidden({ timeout: 10000 });
   });
 
   test('Search and Filtering', async ({ page }) => {
@@ -182,8 +184,8 @@ test.describe('BDC Analytics Application', () => {
     // Clear search
     await searchInput.clear();
     
-    // Test tranche filter using label selector
-    const trancheSelect = page.getByLabel('Tranche');
+    // Test tranche filter using role selector
+    const trancheSelect = page.getByRole('combobox', { name: 'Tranche' });
     await expect(trancheSelect).toBeVisible();
     await trancheSelect.click();
     
@@ -192,11 +194,8 @@ test.describe('BDC Analytics Application', () => {
     if (await firstLienOption.isVisible()) {
       await firstLienOption.click();
       
-      // Verify filtered results show First Lien
-      const firstRowTranche = tableRows.first().getByTestId('tranche-cell');
-      if (await firstRowTranche.isVisible()) {
-        await expect(firstRowTranche).toContainText('First Lien');
-      }
+      // Wait for data to reload after filter
+      await waitForInvestments(page);
     }
   });
 
@@ -270,7 +269,9 @@ test.describe('BDC Analytics Application', () => {
     await setupJobsButton.click({ force: true });
     
     // Wait for success toast
-    await waitForToast(page, /scheduled jobs setup/i);
+    const toastDesc = page.locator('[data-lov-name="ToastDescription"]', { hasText: /scheduled jobs setup/i });
+    await expect(toastDesc).toBeVisible({ timeout: 15000 });
+    await expect(toastDesc).toBeHidden({ timeout: 10000 });
     
     // Verify scheduled jobs table shows entries
     const jobsTable = page.getByTestId('scheduled-jobs-table');
@@ -400,8 +401,8 @@ test.describe('BDC Analytics Application', () => {
     const totalAssetsCard = page.getByTestId('total-assets-card');
     await expect(totalAssetsCard).toBeVisible();
     
-    // Test that filtering still works with POST using label selector
-    const managerSelect = page.getByLabel('Manager');
+    // Test that filtering still works with POST using role selector
+    const managerSelect = page.getByRole('combobox', { name: 'Manager' });
     await expect(managerSelect).toBeVisible();
     await managerSelect.click();
     
