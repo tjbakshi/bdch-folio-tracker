@@ -124,7 +124,7 @@ test.describe('BDC Analytics Application', () => {
     await waitForInvestments(page);
     
     // Apply manager filter using role selector
-    const managerSelect = page.getByRole('combobox', { name: 'Manager' });
+    const managerSelect = page.getByRole('combobox', { name: 'All Managers' });
     await expect(managerSelect).toBeVisible();
     await managerSelect.click();
     
@@ -185,7 +185,7 @@ test.describe('BDC Analytics Application', () => {
     await searchInput.clear();
     
     // Test tranche filter using role selector
-    const trancheSelect = page.getByRole('combobox', { name: 'Tranche' });
+    const trancheSelect = page.getByRole('combobox', { name: 'All Tranches' });
     await expect(trancheSelect).toBeVisible();
     await trancheSelect.click();
     
@@ -402,7 +402,7 @@ test.describe('BDC Analytics Application', () => {
     await expect(totalAssetsCard).toBeVisible();
     
     // Test that filtering still works with POST using role selector
-    const managerSelect = page.getByRole('combobox', { name: 'Manager' });
+    const managerSelect = page.getByRole('combobox', { name: 'All Managers' });
     await expect(managerSelect).toBeVisible();
     await managerSelect.click();
     
