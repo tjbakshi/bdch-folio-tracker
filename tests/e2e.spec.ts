@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { waitForInvestments, waitForToast } from './helpers/playwright';
 
 /**
  * BDC Analytics E2E Test Suite
@@ -59,6 +60,11 @@ test.describe('BDC Analytics Application', () => {
     page.setDefaultTimeout(30000);
   });
 
+  // Clean up routes after each test
+  test.afterEach(async ({ page }) => {
+    page.unroute('**/bdc-api/investments**');
+  });
+
   test('Admin Backfill Flow', async ({ page }) => {
     // Navigate to admin page
     await page.goto('/admin');
@@ -78,10 +84,8 @@ test.describe('BDC Analytics Application', () => {
     await backfillButton.scrollIntoViewIfNeeded();
     await backfillButton.click({ force: true });
     
-    // Wait for success toast using accessible role
-    await expect(
-      page.getByRole('status', { name: /Started backfill for all BDCs/i })
-    ).toBeVisible({ timeout: 10000 });
+    // Wait for success toast using DRY helper
+    await waitForToast(page, /Started backfill for all BDCs/i);
     
     // Verify at least one log entry appears in recent logs
     const logsSection = page.getByTestId('processing-logs');
@@ -110,15 +114,9 @@ test.describe('BDC Analytics Application', () => {
     const averageMarkCard = page.getByTestId('average-mark-card');
     await expect(averageMarkCard).toBeVisible();
     
-    // Wait for data to load and verify non-zero values
-    await expect(async () => {
-      const totalAssetsText = await totalAssetsCard.textContent();
-      const averageMarkText = await averageMarkCard.textContent();
-      
-      // Check that values are not just "$0" or "0%"
-      expect(totalAssetsText).not.toMatch(/\$0[^0-9]/);
-      expect(averageMarkText).not.toMatch(/^0\.0%/);
-    }).toPass({ timeout: 10000 });
+    // Simplified non-zero assertions using toHaveText negation
+    await expect(totalAssetsCard).not.toHaveText(/\$0(?:\.00)?$/);
+    await expect(averageMarkCard).not.toHaveText(/^0\.0%$/);
     
     // Verify holdings table is present and has data
     const holdingsTable = page.getByTestId('holdings-table');
@@ -168,10 +166,8 @@ test.describe('BDC Analytics Application', () => {
     // Verify download properties
     expect(download.suggestedFilename()).toMatch(/bdc-investments.*\.csv/);
     
-    // Verify success toast appears using accessible role
-    await expect(
-      page.getByRole('status', { name: /Export downloaded successfully/i })
-    ).toBeVisible({ timeout: 10000 });
+    // Use DRY helper for toast checking
+    await waitForToast(page, /Export downloaded successfully/i);
   });
 
   test('Search and Filtering', async ({ page }) => {
@@ -181,8 +177,8 @@ test.describe('BDC Analytics Application', () => {
     // Wait for investments data to load
     await waitForInvestments(page);
     
-    // Test search functionality
-    const searchInput = page.getByTestId('search-input');
+    // Use accessible role for search input (if possible, otherwise keep test ID)
+    const searchInput = page.getByRole('textbox', { name: /search/i }).or(page.getByTestId('search-input'));
     await expect(searchInput).toBeVisible();
     
     // Enter search term
@@ -283,10 +279,8 @@ test.describe('BDC Analytics Application', () => {
     await page.waitForTimeout(500); // Wait for any animations
     await setupJobsButton.click({ force: true });
     
-    // Wait for success toast using accessible role
-    await expect(
-      page.getByRole('status', { name: /Scheduled jobs setup/i })
-    ).toBeVisible({ timeout: 10000 });
+    // Wait for success toast using DRY helper
+    await waitForToast(page, /Scheduled jobs setup/i);
     
     // Verify scheduled jobs table shows entries
     const jobsTable = page.getByTestId('scheduled-jobs-table');
@@ -316,7 +310,36 @@ test.describe('BDC Analytics Application', () => {
     ).toBeVisible({ timeout: 10000 });
   });
 
-  test('Responsive Design', async ({ page }) => {
+});
+
+// Group responsive tests in a dedicated describe block
+test.describe('Responsive Design', () => {
+  test.beforeEach(async ({ page }) => {
+    // Same route stubs as main suite
+    await page.route('**/bdc-api/investments**', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: [{
+            id: 'stub-1',
+            company_name: 'Tech Corp',
+            manager: 'ARCC',
+            business_description: 'A tech business',
+            investment_tranche: 'First Lien',
+            principal_amount: 123_456,
+            fair_value: 120_000,
+            filings: { ticker: 'TECH', filing_date: '2024-02-02', filing_type: '10-K' },
+            investments_computed: [{ mark: 0.97, is_non_accrual: false, quarter_year: 'Q1 2024' }]
+          }],
+          pagination: { page: 1, limit: 100, total: 1, totalPages: 1 }
+        })
+      });
+    });
+    page.setDefaultTimeout(30000);
+  });
+
+  test('Mobile Layout', async ({ page }) => {
     // Test mobile viewport
     await page.setViewportSize({ width: 375, height: 667 });
     await page.goto('/');
@@ -330,18 +353,41 @@ test.describe('BDC Analytics Application', () => {
     // Check that cards are stacked vertically (should be visible)
     const summaryCards = page.locator('[data-testid$="-card"]');
     await expect(summaryCards.first()).toBeVisible();
-    
+  });
+
+  test('Tablet Layout', async ({ page }) => {
     // Test tablet viewport
     await page.setViewportSize({ width: 768, height: 1024 });
-    await page.waitForTimeout(500);
+    await page.goto('/');
+    
+    // Wait for investments data to load
+    await waitForInvestments(page);
     
     // Verify layout adjusts
     await expect(page.getByRole('heading', { name: 'BDC Investment Dashboard' })).toBeVisible();
     
-    // Reset to desktop
-    await page.setViewportSize({ width: 1280, height: 720 });
+    // Verify table is responsive
+    const holdingsTable = page.getByTestId('holdings-table');
+    await expect(holdingsTable).toBeVisible();
   });
-  
+
+  test('Desktop Layout', async ({ page }) => {
+    // Test desktop viewport
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.goto('/');
+    
+    // Wait for investments data to load
+    await waitForInvestments(page);
+    
+    // Verify desktop layout works
+    await expect(page.getByRole('heading', { name: 'BDC Investment Dashboard' })).toBeVisible();
+    
+    // Check that all cards are visible
+    const summaryCards = page.locator('[data-testid$="-card"]');
+    await expect(summaryCards.first()).toBeVisible();
+  });
+});
+test.describe('Advanced API Testing', () => {
   test('Dashboard POST-Only Functionality', async ({ page }) => {
     // Un-route the global stub first
     page.unroute('**/bdc-api/investments**');
@@ -483,24 +529,4 @@ test.describe('BDC Analytics Application', () => {
     
     console.log(`✅ Handled ${requestCount} API requests including errors`);
   });
-
 });
-
-/**
- * Helper function to wait for investments data to load
- */
-async function waitForInvestments(page: Page) {
-  await page.waitForResponse(r =>
-    r.url().includes('/bdc-api/investments') && r.status() === 200
-  );
-  await page.waitForSelector('[data-testid="investment-row"]', { timeout: 15000 });
-}
-
-/**
- * Helper function to wait for toast to appear and disappear
- */
-async function waitForToast(page: Page, message: RegExp) {
-  const locator = page.locator(`:text-matches("${message.source}", "i")`, { strict: false }).first();
-  await expect(locator).toBeVisible({ timeout: 15000 });
-  await expect(locator).toBeHidden({ timeout: 10000 });
-}
