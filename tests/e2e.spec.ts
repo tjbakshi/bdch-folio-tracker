@@ -66,6 +66,11 @@ test.describe('BDC Analytics Application', () => {
   });
 
   test('Admin Backfill Flow', async ({ page }) => {
+    // Stub the sec-extractor endpoint that backfill calls
+    await page.route('**/functions/v1/sec-extractor**', route =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({}) })
+    );
+
     // Navigate to admin page
     await page.goto('/admin');
     
