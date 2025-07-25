@@ -89,8 +89,10 @@ test.describe('BDC Analytics Application', () => {
     await backfillButton.scrollIntoViewIfNeeded();
     await backfillButton.click({ force: true });
     
-    // Wait for success toast using DRY helper
-    await waitForToast(page, /Started backfill for all BDCs/i);
+    // Wait for success toast using specific ARIA role to avoid duplicates
+    await expect(
+      page.getByRole('status', { name: /Started backfill for all BDCs/i })
+    ).toBeVisible({ timeout: 10000 });
     
     // Verify at least one log entry appears in recent logs
     const logsSection = page.getByTestId('processing-logs');
