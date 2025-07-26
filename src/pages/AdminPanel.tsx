@@ -416,8 +416,27 @@ const AdminPanel = () => {
                     return;
                   }
                   
+                  console.log('Testing CORS first...');
+                  
+                  // First test CORS with OPTIONS request
+                  try {
+                    const corsResponse = await fetch(`${supabaseUrl}/functions/v1/sec-extractor`, {
+                      method: 'OPTIONS',
+                      headers: { 
+                        'Origin': window.location.origin,
+                        'Access-Control-Request-Method': 'POST',
+                        'Access-Control-Request-Headers': 'Content-Type, Authorization, apikey'
+                      }
+                    });
+                    console.log('CORS preflight status:', corsResponse.status);
+                  } catch (corsError) {
+                    console.log('CORS preflight failed:', corsError);
+                  }
+                  
+                  // Now try the actual request
                   const response = await fetch(`${supabaseUrl}/functions/v1/sec-extractor`, {
                     method: 'POST',
+                    mode: 'cors', // Explicitly set CORS mode
                     headers: { 
                       'Content-Type': 'application/json',
                       'Accept': 'application/json',
@@ -440,12 +459,38 @@ const AdminPanel = () => {
                 } catch (error) {
                   updateStatus(`❌ API test failed: ${error.message}`, 'error');
                   console.error('API test error:', error);
+                  
+                  // Provide more specific error messages
+                  if (error.message.includes('Failed to fetch')) {
+                    updateStatus(`❌ CORS Error: Your edge function may not allow requests from ${window.location.origin}. Check browser console for details.`, 'error');
+                  }
                 }
               }}
               disabled={loading}
               className="w-full bg-gray-500 text-white px-2 py-1 rounded text-xs hover:bg-gray-600 disabled:bg-gray-400"
             >
-              🔧 Test API with Your Keys
+              🔧 Test API with CORS Check
+            </button>
+            
+            {/* Alternative: Test from different origin */}
+            <button 
+              onClick={() => {
+                const testUrl = `https://pkpvyqvcsmyxcudamerw.supabase.co/functions/v1/sec-extractor`;
+                const payload = JSON.stringify({ action: 'backfill_ticker', ticker: 'ARCC', years_back: 1 });
+                
+                const curlCommand = `curl -X POST ${testUrl} \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer ${supabaseKey}" \\
+  -H "apikey: ${supabaseKey}" \\
+  -d '${payload}'`;
+                
+                navigator.clipboard.writeText(curlCommand);
+                updateStatus('📋 Curl command copied to clipboard! Run it in your terminal to test the API directly.', 'info');
+              }}
+              disabled={!supabaseKey.trim()}
+              className="w-full bg-blue-500 text-white px-2 py-1 rounded text-xs hover:bg-blue-600 disabled:bg-gray-400 mt-1"
+            >
+              📋 Copy curl Test Command
             </button>
           </div>
 
