@@ -1,5 +1,5 @@
-// supabase/functions/sec-extractor/index.ts
-// Complete replacement for your existing sec-extractor function
+// File: supabase/functions/sec-extractor/index.ts
+// Replace your entire existing sec-extractor function with this code
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
@@ -62,12 +62,15 @@ interface Investment {
   cik: string;
   ticker: string;
   accession_number?: string;
+  xbrl_concept?: string;
+  filing_form?: string;
+  extraction_method?: string;
 }
 
 class SECAPIExtractor {
   private readonly baseURL = 'https://data.sec.gov/api';
   private readonly headers = {
-    'User-Agent': 'BDC-Portfolio-Tracker github.com/tjbakshi/bdch-folio-tracker', // SEC requires contact info
+    'User-Agent': 'BDC-Portfolio-Tracker github.com/tjbakshi/bdch-folio-tracker contact@yourcompany.com', // UPDATE WITH YOUR EMAIL
     'Accept': 'application/json',
     'Accept-Encoding': 'gzip, deflate'
   };
@@ -140,9 +143,9 @@ class SECAPIExtractor {
     } catch (error) {
       console.error(`[SENTRY] Error extracting BDC investments for ${ticker}:`, error);
       
-      // Fallback to HTML parsing if API fails
-      console.log(`[SENTRY] Falling back to HTML parsing for ${ticker}`);
-      return this.fallbackHTMLParsing(cik, ticker);
+      // Return empty array instead of trying HTML fallback for now
+      console.log(`[SENTRY] SEC API extraction failed for ${ticker}, returning empty results`);
+      return [];
     }
   }
 
@@ -186,10 +189,10 @@ class SECAPIExtractor {
         
         // Process USD data if available
         if (conceptData.units.USD) {
-          const facts = conceptData.units.USD;
-          console.log(`[SENTRY] Processing ${facts.length} USD facts for ${concept}`);
+          const factList = conceptData.units.USD;
+          console.log(`[SENTRY] Processing ${factList.length} USD facts for ${concept}`);
           
-          for (const fact of facts) {
+          for (const fact of factList) {
             const investment = this.parseInvestmentFact(fact, submissions, ticker, facts.cik, concept);
             if (investment) {
               investments.push(investment);
@@ -270,7 +273,10 @@ class SECAPIExtractor {
         report_date: fact.end || submissions.filings.recent.reportDate[filingIndex],
         cik: cik,
         ticker: ticker,
-        accession_number: accessionNumber
+        accession_number: accessionNumber,
+        xbrl_concept: concept,
+        filing_form: submissions.filings.recent.form[filingIndex],
+        extraction_method: 'SEC_API'
       };
 
       // Add additional context if available
@@ -336,50 +342,6 @@ class SECAPIExtractor {
     
     return 'Other Investment';
   }
-
-  /**
-   * Fallback to HTML parsing when API data is insufficient
-   */
-  private async fallbackHTMLParsing(cik: string, ticker: string): Promise<Investment[]> {
-    console.log(`[SENTRY] Executing fallback HTML parsing for ${ticker}`);
-    
-    try {
-      // Get recent 10-K or 10-Q filings
-      const submissions = await this.getCompanySubmissions(cik);
-      const recentForms = submissions.filings.recent;
-      
-      // Find most recent 10-K or 10-Q
-      const targetForms = ['10-K', '10-Q'];
-      let filingIndex = -1;
-      
-      for (let i = 0; i < recentForms.form.length; i++) {
-        if (targetForms.includes(recentForms.form[i])) {
-          filingIndex = i;
-          break;
-        }
-      }
-      
-      if (filingIndex === -1) {
-        throw new Error('No suitable filings found for HTML parsing');
-      }
-      
-      const accessionNumber = recentForms.accessionNumber[filingIndex];
-      const primaryDoc = recentForms.primaryDocument[filingIndex];
-      
-      // Construct filing URL
-      const filingUrl = `https://www.sec.gov/Archives/edgar/data/${cik}/${accessionNumber.replace(/-/g, '')}/${primaryDoc}`;
-      
-      console.log(`[SENTRY] Attempting HTML parsing from: ${filingUrl}`);
-      
-      // For now, return empty array - HTML parsing is complex and should be secondary
-      console.log(`[SENTRY] HTML parsing not implemented - SEC API should be primary method`);
-      return [];
-      
-    } catch (error) {
-      console.error(`[SENTRY] Fallback HTML parsing failed for ${ticker}:`, error);
-      return [];
-    }
-  }
 }
 
 // Database operations
@@ -395,7 +357,7 @@ async function saveInvestmentsToDatabase(supabase: any, investments: Investment[
     const { data, error } = await supabase
       .from('investments')
       .upsert(investments, {
-        onConflict: 'cik,accession_number,issuer',
+        onConflict: 'cik,accession_number,issuer,fair_value',
         ignoreDuplicates: false
       });
 
