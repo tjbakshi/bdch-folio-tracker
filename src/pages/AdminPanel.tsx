@@ -18,14 +18,21 @@ const AdminPanel = () => {
     try {
       console.log('Making API call with payload:', payload);
       
-      const response = await fetch('/functions/v1/sec-extractor', {
+      // Try the correct Supabase edge function URL format
+      const apiUrl = `${window.location.origin}/functions/v1/sec-extractor`;
+      console.log('API URL:', apiUrl);
+      
+      const response = await fetch(apiUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
         body: JSON.stringify(payload)
       });
       
       console.log('Response status:', response.status);
-      console.log('Response headers:', response.headers);
+      console.log('Response headers:', Object.fromEntries(response.headers.entries()));
       
       // Get the raw response text first
       const responseText = await response.text();
@@ -370,9 +377,36 @@ const AdminPanel = () => {
               onClick={async () => {
                 try {
                   updateStatus('🔄 Testing API connection...', 'info');
-                  const result = await callSECExtractor({ action: 'backfill_ticker', ticker: 'ARCC', years_back: 1 });
-                  updateStatus('✅ API test successful!', 'success');
-                  console.log('API test result:', result);
+                  
+                  // Try direct Supabase URL if relative URL fails
+                  let apiUrl = `${window.location.origin}/functions/v1/sec-extractor`;
+                  
+                  // If we're on Vercel, try the Supabase URL directly
+                  if (window.location.hostname.includes('vercel.app')) {
+                    const supabaseUrl = 'https://pkpvyqvcsmyxcudamerw.supabase.co';
+                    apiUrl = `${supabaseUrl}/functions/v1/sec-extractor`;
+                  }
+                  
+                  console.log('Testing with URL:', apiUrl);
+                  
+                  const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 
+                      'Content-Type': 'application/json',
+                      'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({ action: 'backfill_ticker', ticker: 'ARCC', years_back: 1 })
+                  });
+                  
+                  console.log('Response status:', response.status);
+                  const responseText = await response.text();
+                  console.log('Response text:', responseText);
+                  
+                  if (response.ok) {
+                    updateStatus('✅ API test successful!', 'success');
+                  } else {
+                    updateStatus(`❌ API returned ${response.status}: ${responseText}`, 'error');
+                  }
                 } catch (error) {
                   updateStatus(`❌ API test failed: ${error.message}`, 'error');
                   console.error('API test error:', error);
@@ -381,7 +415,7 @@ const AdminPanel = () => {
               disabled={loading}
               className="w-full bg-gray-500 text-white px-2 py-1 rounded text-xs hover:bg-gray-600 disabled:bg-gray-400"
             >
-              🔧 Test API Only
+              🔧 Test API Connection
             </button>
           </div>
 
