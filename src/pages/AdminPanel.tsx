@@ -13,52 +13,47 @@ const AdminPanel = () => {
     console.log(`[${type.toUpperCase()}] ${message}`);
   };
 
+  const [supabaseUrl, setSupabaseUrl] = useState('https://pkpvyqvcsmyxcudamerw.supabase.co');
+  const [supabaseKey, setSupabaseKey] = useState('');
+
   // Helper function to make API calls with better error handling
   const callSECExtractor = async (payload) => {
+    if (!supabaseKey.trim()) {
+      throw new Error('Please enter your Supabase anon key first');
+    }
+
     try {
       console.log('Making API call with payload:', payload);
       
-      // Use direct Supabase URL with proper auth headers
-      const apiUrl = 'https://pkpvyqvcsmyxcudamerw.supabase.co/functions/v1/sec-extractor';
-      console.log('API URL:', apiUrl);
-      
-      // Get the anon key from your project settings
-      const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBrcHZ5cXZjc215eGN1ZGFtZXJ3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU4NzQ2NzQsImV4cCI6MjA2MTQ1MDY3NH0.HlvI2MkKyZLpZCZOqWd4z6zXzgSe4u4XW_HQjK8w-qo';
-      
-      const response = await fetch(apiUrl, {
+      const response = await fetch(`${supabaseUrl}/functions/v1/sec-extractor`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
           'Accept': 'application/json',
-          'Authorization': `Bearer ${supabaseAnonKey}`,
-          'apikey': supabaseAnonKey
+          'Authorization': `Bearer ${supabaseKey}`,
+          'apikey': supabaseKey
         },
         body: JSON.stringify(payload)
       });
       
       console.log('Response status:', response.status);
-      console.log('Response headers:', Object.fromEntries(response.headers.entries()));
       
-      // Get the raw response text first
       const responseText = await response.text();
       console.log('Raw response:', responseText);
       
-      // Check if response is empty
       if (!responseText) {
         throw new Error(`Empty response from server (status: ${response.status})`);
       }
       
-      // Try to parse as JSON
       let result;
       try {
         result = JSON.parse(responseText);
       } catch (jsonError) {
-        console.error('JSON parsing failed:', jsonError);
         throw new Error(`Invalid JSON response: ${responseText.substring(0, 200)}...`);
       }
       
       if (!response.ok) {
-        throw new Error(result.error || `API call failed: ${response.status} - ${response.statusText}`);
+        throw new Error(result.error || result.message || `API call failed: ${response.status} - ${response.statusText}`);
       }
       
       return result;
@@ -315,6 +310,39 @@ const AdminPanel = () => {
         <p className="text-gray-600">Manage SEC data extraction, backfill processes, and monitor new filings for all BDC companies.</p>
       </div>
 
+      {/* Supabase Configuration */}
+      <div className="bg-yellow-50 p-6 rounded-lg mb-6 border border-yellow-200">
+        <h3 className="text-xl font-semibold text-yellow-800 mb-4">🔑 Supabase Configuration</h3>
+        <p className="text-sm text-yellow-700 mb-4">Enter your Supabase credentials to enable API calls:</p>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Supabase URL:</label>
+            <input
+              type="text"
+              value={supabaseUrl}
+              onChange={(e) => setSupabaseUrl(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+              placeholder="https://your-project.supabase.co"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Supabase Anon Key:</label>
+            <input
+              type="password"
+              value={supabaseKey}
+              onChange={(e) => setSupabaseKey(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+              placeholder="eyJ... (your anon public key)"
+            />
+          </div>
+        </div>
+        
+        <div className="mt-4 p-3 bg-blue-50 rounded text-xs text-blue-800">
+          💡 <strong>How to get these:</strong> Go to Supabase Dashboard → Settings → API → Copy "Project URL" and "anon public" key
+        </div>
+      </div>
+
       {/* Single BDC Selection */}
       <div className="bg-red-50 p-4 rounded-lg mb-6">
         <h3 className="text-lg font-semibold text-red-800 mb-3">📌 Single BDC Selection</h3>
@@ -381,21 +409,20 @@ const AdminPanel = () => {
             <button 
               onClick={async () => {
                 try {
-                  updateStatus('🔄 Testing API with authorization...', 'info');
+                  updateStatus('🔄 Testing API with your credentials...', 'info');
                   
-                  // Use direct Supabase URL with auth
-                  const apiUrl = 'https://pkpvyqvcsmyxcudamerw.supabase.co/functions/v1/sec-extractor';
-                  const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBrcHZ5cXZjc215eGN1ZGFtZXJ3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU4NzQ2NzQsImV4cCI6MjA2MTQ1MDY3NH0.HlvI2MkKyZLpZCZOqWd4z6zXzgSe4u4XW_HQjK8w-qo';
+                  if (!supabaseKey.trim()) {
+                    updateStatus('❌ Please enter your Supabase anon key first', 'error');
+                    return;
+                  }
                   
-                  console.log('Testing with URL:', apiUrl);
-                  
-                  const response = await fetch(apiUrl, {
+                  const response = await fetch(`${supabaseUrl}/functions/v1/sec-extractor`, {
                     method: 'POST',
                     headers: { 
                       'Content-Type': 'application/json',
                       'Accept': 'application/json',
-                      'Authorization': `Bearer ${supabaseAnonKey}`,
-                      'apikey': supabaseAnonKey
+                      'Authorization': `Bearer ${supabaseKey}`,
+                      'apikey': supabaseKey
                     },
                     body: JSON.stringify({ action: 'backfill_ticker', ticker: 'ARCC', years_back: 1 })
                   });
@@ -406,7 +433,7 @@ const AdminPanel = () => {
                   
                   if (response.ok) {
                     const result = JSON.parse(responseText);
-                    updateStatus(`✅ API test successful! Response: ${JSON.stringify(result)}`, 'success');
+                    updateStatus(`✅ API test successful! Processing started.`, 'success');
                   } else {
                     updateStatus(`❌ API returned ${response.status}: ${responseText}`, 'error');
                   }
@@ -418,7 +445,7 @@ const AdminPanel = () => {
               disabled={loading}
               className="w-full bg-gray-500 text-white px-2 py-1 rounded text-xs hover:bg-gray-600 disabled:bg-gray-400"
             >
-              🔧 Test API with Auth
+              🔧 Test API with Your Keys
             </button>
           </div>
 
