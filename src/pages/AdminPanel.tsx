@@ -1,334 +1,439 @@
 import React, { useState } from 'react';
 
 const AdminPanel = () => {
-  const [isLoading, setIsLoading] = useState(false);
-  const [results, setResults] = useState(null);
-  const [error, setError] = useState(null);
+  const [status, setStatus] = useState('');
+  const [statusType, setStatusType] = useState('info');
+  const [loading, setLoading] = useState(false);
   const [selectedTicker, setSelectedTicker] = useState('ARCC');
 
-  // Your Supabase configuration
-  const SUPABASE_URL = 'https://pkpvyqvcsmyxcudamerw.supabase.co';
-  const SERVICE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBrcHZ5cXZjc215eGN1ZGFtZXJ3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1MzMyMzExOCwiZXhwIjoyMDY4ODk5MTE4fQ.CQH6gkNV3S36ER2dGXUvkNMJWij66YOOlvSBzGq0dvc';
+  // Helper function to update status
+  const updateStatus = (message, type = 'info') => {
+    setStatus(message);
+    setStatusType(type);
+    console.log(`[${type.toUpperCase()}] ${message}`);
+  };
 
-  // List of BDC tickers for dropdown
-  const bdcTickers = [
-    'ARCC', 'BBDC', 'BCSF', 'BXSL', 'CCAP', 'CGBD', 'CION', 'FDUS', 'FSK', 'GBDC',
-    'GSBD', 'HTGC', 'ICMB', 'LIEN', 'MAIN', 'MFIC', 'MRCC', 'MSDL', 'MSIF', 'NCDL',
-    'NMFC', 'OBDC', 'OCSL', 'OFS', 'PFLT', 'PNNT', 'PSBD', 'PSEC', 'SAR', 'SCM',
-    'SLRC', 'TCPC', 'TSLX', 'WHF'
-  ];
+  // Helper function to make API calls
+  const callSECExtractor = async (payload) => {
+    const response = await fetch('/functions/v1/sec-extractor', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    
+    const result = await response.json();
+    
+    if (!response.ok) {
+      throw new Error(result.error || `API call failed: ${response.status}`);
+    }
+    
+    return result;
+  };
 
-  const callSECExtractor = async (action, additionalParams = {}) => {
-    setIsLoading(true);
-    setError(null);
-    setResults(null);
-
+  // 1. FULL BACKFILL + INVESTMENT EXTRACTION
+  const handleFullBackfill = async () => {
+    setLoading(true);
     try {
-      const response = await fetch(`${SUPABASE_URL}/functions/v1/sec-extractor`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${SERVICE_KEY}`
-        },
-        body: JSON.stringify({
-          action,
-          ...additionalParams
-        })
-      });
-
-      const data = await response.json();
+      updateStatus('🔄 Starting full backfill for all BDCs...', 'info');
       
-      if (response.ok) {
-        setResults(data);
-      } else {
-        setError(data.error || 'Unknown error occurred');
-      }
-    } catch (err) {
-      setError(err.message);
+      // Step 1: Download all SEC filings
+      const filingResult = await callSECExtractor({ action: 'backfill_all' });
+      console.log('Filing backfill result:', filingResult);
+      
+      updateStatus(`✅ Filing backfill completed! Processed ${filingResult.processed} BDCs. Now extracting investments...`, 'success');
+      
+      // Step 2: Extract investment data from all filings
+      const extractResult = await callSECExtractor({ action: 'extract_all_investments' });
+      console.log('Investment extraction result:', extractResult);
+      
+      updateStatus(`🎉 Complete! Processed ${extractResult.processed} filings and extracted ${extractResult.investments_extracted} investments!`, 'success');
+      
+    } catch (error) {
+      console.error('Full backfill error:', error);
+      updateStatus(`❌ Error: ${error.message}`, 'error');
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   };
 
-  const adminActions = [
-    {
-      id: 'backfill_all',
-      title: 'Full Backfill (All BDCs)',
-      description: 'Process all 34 BDCs for the last 9 years of filings',
-      buttonText: 'Start Full Backfill',
-      color: 'bg-blue-600 hover:bg-blue-700',
-      action: () => callSECExtractor('backfill_all'),
-      warning: 'This will take 15-30 minutes and process hundreds of filings.',
-      category: 'Initial Setup'
-    },
-    {
-      id: 'test_single',
-      title: 'Test Single BDC',
-      description: 'Test with ARCC for 1 year (quick test)',
-      buttonText: 'Test ARCC',
-      color: 'bg-green-600 hover:bg-green-700',
-      action: () => callSECExtractor('backfill_ticker', { ticker: 'ARCC', yearsBack: 1 }),
-      category: 'Testing'
-    },
-    {
-      id: 'setup_jobs',
-      title: 'Setup Scheduled Jobs',
-      description: 'Configure automatic filing monitoring',
-      buttonText: 'Setup Jobs',
-      color: 'bg-purple-600 hover:bg-purple-700',
-      action: () => callSECExtractor('setup_scheduled_jobs'),
-      category: 'Initial Setup'
+  // 2. TEST SINGLE TICKER + INVESTMENT EXTRACTION
+  const handleTestARCC = async () => {
+    setLoading(true);
+    try {
+      updateStatus(`🔄 Testing ARCC - downloading filings and extracting investments...`, 'info');
+      
+      // Step 1: Backfill filings for ARCC (1 year)
+      await callSECExtractor({ 
+        action: 'backfill_ticker', 
+        ticker: 'ARCC',
+        years_back: 1
+      });
+      
+      updateStatus(`✅ Filing backfill for ARCC completed. Now extracting investments...`, 'info');
+      
+      // Step 2: Extract investments for ARCC
+      const extractResult = await callSECExtractor({ 
+        action: 'extract_investments', 
+        ticker: 'ARCC' 
+      });
+      
+      updateStatus(`🎉 ARCC test completed! Processed ${extractResult.processed} filings and extracted ${extractResult.investments_extracted} investments!`, 'success');
+      
+    } catch (error) {
+      console.error('Test ARCC error:', error);
+      updateStatus(`❌ ARCC test failed: ${error.message}`, 'error');
+    } finally {
+      setLoading(false);
     }
-  ];
+  };
 
-  const updateActions = [
-    {
-      id: 'check_new_10k',
-      title: 'Check for New 10-K Filings',
-      description: 'Scan all BDCs for new annual filings since last update',
-      buttonText: 'Check New 10-Ks',
-      color: 'bg-orange-600 hover:bg-orange-700',
-      action: () => callSECExtractor('incremental_check', { ticker: 'ALL', filing_type: '10-K' }),
-      category: 'Updates'
-    },
-    {
-      id: 'check_new_10q',
-      title: 'Check for New 10-Q Filings',
-      description: 'Scan all BDCs for new quarterly filings since last update',
-      buttonText: 'Check New 10-Qs',
-      color: 'bg-indigo-600 hover:bg-indigo-700',
-      action: () => callSECExtractor('incremental_check', { ticker: 'ALL', filing_type: '10-Q' }),
-      category: 'Updates'
-    },
-    {
-      id: 'update_single_10k',
-      title: 'Update Single BDC (10-K)',
-      description: 'Check for new annual filings for a specific BDC',
-      buttonText: 'Update 10-K',
-      color: 'bg-cyan-600 hover:bg-cyan-700',
-      action: () => callSECExtractor('incremental_check', { ticker: selectedTicker, filing_type: '10-K' }),
-      category: 'Updates'
-    },
-    {
-      id: 'update_single_10q',
-      title: 'Update Single BDC (10-Q)',
-      description: 'Check for new quarterly filings for a specific BDC',
-      buttonText: 'Update 10-Q',
-      color: 'bg-teal-600 hover:bg-teal-700',
-      action: () => callSECExtractor('incremental_check', { ticker: selectedTicker, filing_type: '10-Q' }),
-      category: 'Updates'
+  // 3. CHECK NEW 10-K FILINGS + EXTRACT INVESTMENTS
+  const handleCheck10K = async () => {
+    setLoading(true);
+    try {
+      updateStatus(`🔄 Checking for new 10-K filings and extracting investments...`, 'info');
+      
+      const bdcTickers = ['ARCC', 'BXSL', 'MAIN', 'NEWT', 'ORCC', 'PSEC', 'TSLX', 'CGBD', 'TCPC', 'GBDC', 'HTGC', 'GAIN', 'MFIC', 'OCSL'];
+      let totalNewFilings = 0;
+      let totalInvestments = 0;
+      
+      for (const ticker of bdcTickers) {
+        try {
+          // Step 1: Check for new 10-K filings
+          const filingResult = await callSECExtractor({ 
+            action: 'incremental_check',
+            ticker: ticker,
+            filing_type: '10-K'
+          });
+          
+          if (filingResult.new_filings > 0) {
+            totalNewFilings += filingResult.new_filings;
+            
+            // Step 2: Extract investments from new filings
+            const extractResult = await callSECExtractor({ 
+              action: 'extract_investments',
+              ticker: ticker
+            });
+            
+            totalInvestments += extractResult.investments_extracted || 0;
+          }
+          
+          // Small delay between tickers
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
+        } catch (error) {
+          console.error(`Error processing ${ticker}:`, error);
+        }
+      }
+      
+      updateStatus(`✅ 10-K check completed! Found ${totalNewFilings} new filings and extracted ${totalInvestments} investments.`, 'success');
+      
+    } catch (error) {
+      console.error('Check new 10-K error:', error);
+      updateStatus(`❌ Error checking 10-K filings: ${error.message}`, 'error');
+    } finally {
+      setLoading(false);
     }
-  ];
+  };
 
-  const allActions = [...adminActions, ...updateActions];
+  // 4. CHECK NEW 10-Q FILINGS + EXTRACT INVESTMENTS
+  const handleCheck10Q = async () => {
+    setLoading(true);
+    try {
+      updateStatus(`🔄 Checking for new 10-Q filings and extracting investments...`, 'info');
+      
+      const bdcTickers = ['ARCC', 'BXSL', 'MAIN', 'NEWT', 'ORCC', 'PSEC', 'TSLX', 'CGBD', 'TCPC', 'GBDC', 'HTGC', 'GAIN', 'MFIC', 'OCSL'];
+      let totalNewFilings = 0;
+      let totalInvestments = 0;
+      
+      for (const ticker of bdcTickers) {
+        try {
+          // Step 1: Check for new 10-Q filings
+          const filingResult = await callSECExtractor({ 
+            action: 'incremental_check',
+            ticker: ticker,
+            filing_type: '10-Q'
+          });
+          
+          if (filingResult.new_filings > 0) {
+            totalNewFilings += filingResult.new_filings;
+            
+            // Step 2: Extract investments from new filings
+            const extractResult = await callSECExtractor({ 
+              action: 'extract_investments',
+              ticker: ticker
+            });
+            
+            totalInvestments += extractResult.investments_extracted || 0;
+          }
+          
+          // Small delay between tickers
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
+        } catch (error) {
+          console.error(`Error processing ${ticker}:`, error);
+        }
+      }
+      
+      updateStatus(`✅ 10-Q check completed! Found ${totalNewFilings} new filings and extracted ${totalInvestments} investments.`, 'success');
+      
+    } catch (error) {
+      console.error('Check new 10-Q error:', error);
+      updateStatus(`❌ Error checking 10-Q filings: ${error.message}`, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 5. UPDATE SINGLE BDC (10-K) + EXTRACT INVESTMENTS
+  const handleUpdate10K = async () => {
+    setLoading(true);
+    try {
+      updateStatus(`🔄 Updating ${selectedTicker} 10-K filings and extracting investments...`, 'info');
+      
+      // Step 1: Check for new 10-K filings for this specific BDC
+      const filingResult = await callSECExtractor({ 
+        action: 'incremental_check',
+        ticker: selectedTicker,
+        filing_type: '10-K'
+      });
+      
+      if (filingResult.new_filings > 0) {
+        updateStatus(`✅ Found ${filingResult.new_filings} new 10-K filings for ${selectedTicker}. Extracting investments...`, 'info');
+        
+        // Step 2: Extract investments from new filings
+        const extractResult = await callSECExtractor({ 
+          action: 'extract_investments',
+          ticker: selectedTicker
+        });
+        
+        updateStatus(`🎉 ${selectedTicker} update completed! Processed ${extractResult.processed} filings and extracted ${extractResult.investments_extracted} investments!`, 'success');
+      } else {
+        updateStatus(`ℹ️ No new 10-K filings found for ${selectedTicker}.`, 'info');
+      }
+      
+    } catch (error) {
+      console.error(`Update ${selectedTicker} error:`, error);
+      updateStatus(`❌ Error updating ${selectedTicker}: ${error.message}`, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 6. UPDATE SINGLE BDC (10-Q) + EXTRACT INVESTMENTS
+  const handleUpdate10Q = async () => {
+    setLoading(true);
+    try {
+      updateStatus(`🔄 Updating ${selectedTicker} 10-Q filings and extracting investments...`, 'info');
+      
+      // Step 1: Check for new 10-Q filings for this specific BDC
+      const filingResult = await callSECExtractor({ 
+        action: 'incremental_check',
+        ticker: selectedTicker,
+        filing_type: '10-Q'
+      });
+      
+      if (filingResult.new_filings > 0) {
+        updateStatus(`✅ Found ${filingResult.new_filings} new 10-Q filings for ${selectedTicker}. Extracting investments...`, 'info');
+        
+        // Step 2: Extract investments from new filings
+        const extractResult = await callSECExtractor({ 
+          action: 'extract_investments',
+          ticker: selectedTicker
+        });
+        
+        updateStatus(`🎉 ${selectedTicker} update completed! Processed ${extractResult.processed} filings and extracted ${extractResult.investments_extracted} investments!`, 'success');
+      } else {
+        updateStatus(`ℹ️ No new 10-Q filings found for ${selectedTicker}.`, 'info');
+      }
+      
+    } catch (error) {
+      console.error(`Update ${selectedTicker} error:`, error);
+      updateStatus(`❌ Error updating ${selectedTicker}: ${error.message}`, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
-    <div className="max-w-6xl mx-auto p-6 bg-white">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">
-          🔧 BDC Admin Panel
-        </h1>
-        <p className="text-gray-600">
-          Manage SEC data extraction, backfill processes, and monitor new filings for all BDC companies.
-        </p>
+    <div className="max-w-4xl mx-auto p-6 bg-white">
+      <div className="text-center mb-8">
+        <h1 className="text-3xl font-bold text-gray-800 mb-2">🏦 BDC Admin Panel</h1>
+        <p className="text-gray-600">Manage SEC data extraction, backfill processes, and monitor new filings for all BDC companies.</p>
       </div>
 
-      {/* Ticker Selection for Single Updates */}
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-        <h3 className="text-lg font-semibold text-blue-900 mb-2">
-          📌 Single BDC Selection
-        </h3>
-        <div className="flex items-center space-x-4">
-          <label className="text-blue-800 font-medium">Select BDC for single updates:</label>
-          <select
-            value={selectedTicker}
+      {/* Single BDC Selection */}
+      <div className="bg-red-50 p-4 rounded-lg mb-6">
+        <h3 className="text-lg font-semibold text-red-800 mb-3">📌 Single BDC Selection</h3>
+        <div className="flex items-center gap-4">
+          <label className="text-sm font-medium text-gray-700">Select BDC for single updates:</label>
+          <select 
+            value={selectedTicker} 
             onChange={(e) => setSelectedTicker(e.target.value)}
-            className="border border-blue-300 rounded px-3 py-2 bg-white"
+            className="px-3 py-1 border border-gray-300 rounded-md text-sm"
           >
-            {bdcTickers.map(ticker => (
-              <option key={ticker} value={ticker}>{ticker}</option>
-            ))}
+            <option value="ARCC">ARCC</option>
+            <option value="BXSL">BXSL</option>
+            <option value="MAIN">MAIN</option>
+            <option value="NEWT">NEWT</option>
+            <option value="ORCC">ORCC</option>
+            <option value="PSEC">PSEC</option>
+            <option value="TSLX">TSLX</option>
+            <option value="CGBD">CGBD</option>
+            <option value="TCPC">TCPC</option>
+            <option value="GBDC">GBDC</option>
+            <option value="HTGC">HTGC</option>
+            <option value="GAIN">GAIN</option>
+            <option value="MFIC">MFIC</option>
+            <option value="OCSL">OCSL</option>
           </select>
-          <span className="text-blue-600 text-sm">
-            Currently selected: <strong>{selectedTicker}</strong>
-          </span>
+          <span className="text-xs text-gray-500">Currently selected: {selectedTicker}</span>
         </div>
       </div>
 
-      {/* Initial Setup Actions */}
-      <div className="mb-8">
-        <h2 className="text-2xl font-bold text-gray-900 mb-4">
-          🚀 Initial Setup & Testing
-        </h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {adminActions.map((action) => (
-            <div key={action.id} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                {action.title}
-              </h3>
-              <p className="text-gray-600 text-sm mb-3">
-                {action.description}
-              </p>
-              {action.warning && (
-                <div className="bg-yellow-50 border border-yellow-200 rounded-md p-2 mb-3">
-                  <p className="text-yellow-800 text-xs">
-                    ⚠️ {action.warning}
-                  </p>
-                </div>
-              )}
-              <button
-                onClick={action.action}
-                disabled={isLoading}
-                className={`${action.color} text-white px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed w-full text-sm`}
-              >
-                {isLoading ? '⏳ Processing...' : action.buttonText}
-              </button>
+      {/* Initial Setup & Testing */}
+      <div className="bg-blue-50 p-6 rounded-lg mb-6">
+        <h3 className="text-xl font-semibold text-blue-800 mb-4">🚀 Initial Setup & Testing</h3>
+        
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Full Backfill */}
+          <div className="bg-white p-4 rounded-lg border border-blue-200">
+            <h4 className="font-semibold text-blue-700 mb-2">Full Backfill (All BDCs)</h4>
+            <p className="text-sm text-gray-600 mb-3">Process all 34 BDCs for the last 9 years of filings + extract ALL investments</p>
+            <div className="mb-3 p-2 bg-yellow-50 rounded text-xs text-yellow-800">
+              ⚠️ This will take 15-30 minutes and process hundreds of filings.
             </div>
-          ))}
+            <button 
+              onClick={handleFullBackfill}
+              disabled={loading}
+              className="w-full bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+            >
+              {loading ? '🔄 Processing...' : '🚀 Start Full Backfill + Extract All'}
+            </button>
+          </div>
+
+          {/* Test Single BDC */}
+          <div className="bg-white p-4 rounded-lg border border-green-200">
+            <h4 className="font-semibold text-green-700 mb-2">Test Single BDC</h4>
+            <p className="text-sm text-gray-600 mb-3">Test with ARCC for 1 year (quick test) + extract investments</p>
+            <button 
+              onClick={handleTestARCC}
+              disabled={loading}
+              className="w-full bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+            >
+              {loading ? '🔄 Testing...' : '🧪 Test ARCC + Extract'}
+            </button>
+          </div>
+
+          {/* Setup Scheduled Jobs */}
+          <div className="bg-white p-4 rounded-lg border border-purple-200">
+            <h4 className="font-semibold text-purple-700 mb-2">Setup Scheduled Jobs</h4>
+            <p className="text-sm text-gray-600 mb-3">Configure automatic filing monitoring</p>
+            <button 
+              onClick={() => callSECExtractor({ action: 'setup_scheduled_jobs' })}
+              disabled={loading}
+              className="w-full bg-purple-600 text-white px-4 py-2 rounded-md hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+            >
+              {loading ? '⚙️ Setting up...' : '⚙️ Setup Jobs'}
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Update & Monitoring Actions */}
-      <div className="mb-8">
-        <h2 className="text-2xl font-bold text-gray-900 mb-4">
-          🔄 Updates & New Filings
-        </h2>
+      {/* Updates & New Filings */}
+      <div className="bg-green-50 p-6 rounded-lg mb-6">
+        <h3 className="text-xl font-semibold text-green-800 mb-4">📈 Updates & New Filings</h3>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+          {/* Check for New 10-K Filings */}
+          <div className="bg-white p-4 rounded-lg border border-orange-200">
+            <h4 className="font-semibold text-orange-700 mb-2">Check for New 10-K Filings</h4>
+            <p className="text-sm text-gray-600 mb-3">Scan all BDCs for new annual filings since last update + extract investments</p>
+            <button 
+              onClick={handleCheck10K}
+              disabled={loading}
+              className="w-full bg-orange-600 text-white px-4 py-2 rounded-md hover:bg-orange-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+            >
+              {loading ? '🔍 Checking...' : '📊 Check New 10-Ks + Extract'}
+            </button>
+          </div>
+
+          {/* Check for New 10-Q Filings */}
+          <div className="bg-white p-4 rounded-lg border border-blue-200">
+            <h4 className="font-semibold text-blue-700 mb-2">Check for New 10-Q Filings</h4>
+            <p className="text-sm text-gray-600 mb-3">Scan all BDCs for new quarterly filings since last update + extract investments</p>
+            <button 
+              onClick={handleCheck10Q}
+              disabled={loading}
+              className="w-full bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+            >
+              {loading ? '🔍 Checking...' : '📈 Check New 10-Qs + Extract'}
+            </button>
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {updateActions.map((action) => (
-            <div key={action.id} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                {action.title}
-              </h3>
-              <p className="text-gray-600 text-sm mb-3">
-                {action.description}
-              </p>
-              {action.id.includes('single') && (
-                <div className="bg-blue-50 border border-blue-200 rounded-md p-2 mb-3">
-                  <p className="text-blue-800 text-xs">
-                    📌 Will check: <strong>{selectedTicker}</strong>
-                  </p>
-                </div>
-              )}
-              <button
-                onClick={action.action}
-                disabled={isLoading}
-                className={`${action.color} text-white px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed w-full text-sm`}
-              >
-                {isLoading ? '⏳ Processing...' : action.buttonText}
-              </button>
-            </div>
-          ))}
+          {/* Update Single BDC (10-K) */}
+          <div className="bg-white p-4 rounded-lg border border-teal-200">
+            <h4 className="font-semibold text-teal-700 mb-2">Update Single BDC (10-K)</h4>
+            <p className="text-sm text-gray-600 mb-3">Check for new annual filings for a specific BDC + extract investments</p>
+            <div className="text-xs text-gray-500 mb-2">📌 Will check: {selectedTicker}</div>
+            <button 
+              onClick={handleUpdate10K}
+              disabled={loading}
+              className="w-full bg-teal-600 text-white px-4 py-2 rounded-md hover:bg-teal-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+            >
+              {loading ? '🔄 Updating...' : '🔄 Update 10-K + Extract'}
+            </button>
+          </div>
+
+          {/* Update Single BDC (10-Q) */}
+          <div className="bg-white p-4 rounded-lg border border-teal-200">
+            <h4 className="font-semibold text-teal-700 mb-2">Update Single BDC (10-Q)</h4>
+            <p className="text-sm text-gray-600 mb-3">Check for new quarterly filings for a specific BDC + extract investments</p>
+            <div className="text-xs text-gray-500 mb-2">📌 Will check: {selectedTicker}</div>
+            <button 
+              onClick={handleUpdate10Q}
+              disabled={loading}
+              className="w-full bg-teal-600 text-white px-4 py-2 rounded-md hover:bg-teal-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+            >
+              {loading ? '🔄 Updating...' : '🔄 Update 10-Q + Extract'}
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Loading Indicator */}
-      {isLoading && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 mb-6">
-          <div className="flex items-center">
-            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mr-3"></div>
-            <div>
-              <h3 className="text-lg font-semibold text-blue-900">Processing...</h3>
-              <p className="text-blue-700">
-                This may take several minutes. Please don't close this page.
-              </p>
-            </div>
-          </div>
+      {/* Status Display */}
+      {status && (
+        <div className={`p-4 rounded-lg mb-6 ${
+          statusType === 'success' ? 'bg-green-100 border border-green-300 text-green-800' :
+          statusType === 'error' ? 'bg-red-100 border border-red-300 text-red-800' :
+          statusType === 'warning' ? 'bg-yellow-100 border border-yellow-300 text-yellow-800' :
+          'bg-blue-100 border border-blue-300 text-blue-800'
+        }`}>
+          <div className="font-medium">{status}</div>
         </div>
       )}
 
-      {/* Results */}
-      {results && (
-        <div className="bg-green-50 border border-green-200 rounded-lg p-6 mb-6">
-          <h3 className="text-lg font-semibold text-green-900 mb-3">
-            ✅ Success!
-          </h3>
-          <div className="bg-white p-4 rounded border">
-            {/* Pretty display for common result types */}
-            {results.message && (
-              <div className="mb-2">
-                <strong>Message:</strong> {results.message}
-              </div>
-            )}
-            {results.processed !== undefined && (
-              <div className="mb-2">
-                <strong>Processed:</strong> {results.processed} BDCs
-              </div>
-            )}
-            {results.errors !== undefined && (
-              <div className="mb-2">
-                <strong>Errors:</strong> {results.errors}
-              </div>
-            )}
-            {results.new_filings !== undefined && (
-              <div className="mb-2">
-                <strong>New Filings Found:</strong> {results.new_filings}
-              </div>
-            )}
-            {results.extracted !== undefined && (
-              <div className="mb-2">
-                <strong>Extracted:</strong> {results.extracted} filings
-              </div>
-            )}
-            <details className="mt-4">
-              <summary className="cursor-pointer text-sm text-gray-600">
-                Show full response
-              </summary>
-              <pre className="mt-2 text-xs overflow-auto bg-gray-50 p-2 rounded">
-                {JSON.stringify(results, null, 2)}
-              </pre>
-            </details>
-          </div>
-        </div>
-      )}
-
-      {/* Errors */}
-      {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-6 mb-6">
-          <h3 className="text-lg font-semibold text-red-900 mb-3">
-            ❌ Error
-          </h3>
-          <p className="text-red-700 bg-white p-4 rounded border font-mono text-sm">
-            {error}
-          </p>
-        </div>
-      )}
-
-      {/* Quick Stats & Usage Guide */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-gray-50 rounded-lg p-6 border border-gray-200">
-          <h3 className="text-lg font-semibold text-gray-900 mb-3">
-            📊 Quick Info
-          </h3>
-          <div className="grid grid-cols-2 gap-4 text-sm">
-            <div>
-              <p className="text-gray-600">Total BDCs</p>
-              <p className="font-semibold text-lg">34</p>
-            </div>
-            <div>
-              <p className="text-gray-600">Backfill Range</p>
-              <p className="font-semibold text-lg">9 Years</p>
-            </div>
-            <div>
-              <p className="text-gray-600">Filing Types</p>
-              <p className="font-semibold text-lg">10-K, 10-Q</p>
-            </div>
-            <div>
-              <p className="text-gray-600">Expected Filings</p>
-              <p className="font-semibold text-lg">~1,200+</p>
-            </div>
+      {/* Quick Info */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="bg-gray-50 p-4 rounded-lg">
+          <h4 className="font-semibold text-gray-700 mb-2">📊 Quick Info</h4>
+          <div className="space-y-1 text-sm text-gray-600">
+            <div><strong>Total BDCs:</strong> 34</div>
+            <div><strong>Backfill Range:</strong> 9 Years</div>
+            <div><strong>Filing Types:</strong> 10-K, 10-Q</div>
+            <div><strong>Expected Filings:</strong> ~1,200+</div>
           </div>
         </div>
 
-        <div className="bg-blue-50 rounded-lg p-6 border border-blue-200">
-          <h3 className="text-lg font-semibold text-blue-900 mb-3">
-            💡 Usage Guide
-          </h3>
-          <div className="text-sm text-blue-800 space-y-2">
-            <p><strong>First time?</strong> Run "Full Backfill" to get all historical data.</p>
-            <p><strong>Daily updates:</strong> Use "Check New 10-Qs" for quarterly filings.</p>
-            <p><strong>Annual updates:</strong> Use "Check New 10-Ks" around fiscal year-ends.</p>
-            <p><strong>Single BDC:</strong> Select ticker above and use single update buttons.</p>
-            <p><strong>Monitoring:</strong> Set up scheduled jobs for automatic checks.</p>
+        <div className="bg-yellow-50 p-4 rounded-lg">
+          <h4 className="font-semibold text-yellow-800 mb-2">💡 Usage Guide</h4>
+          <div className="space-y-1 text-sm text-yellow-700">
+            <div><strong>First time?</strong> Run "Full Backfill" to get all historical data</div>
+            <div><strong>Daily updates:</strong> Use "Check New" buttons for quarterly filings</div>
+            <div><strong>Single BDC:</strong> Use dropdown + single update buttons</div>
+            <div><strong>Monitoring:</strong> Set up scheduled jobs for automation</div>
           </div>
         </div>
       </div>
