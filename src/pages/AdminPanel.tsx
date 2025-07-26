@@ -59,13 +59,9 @@ export default function BDCAdminPage() {
     setCurrentOperation(action);
     
     try {
-      // Call Supabase function directly
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-      if (!supabaseUrl || !supabaseAnonKey) {
-        throw new Error('Missing Supabase environment variables. Check your .env.local file.');
-      }
+      // Hardcoded values (temporary fix for environment variable issues)
+      const supabaseUrl = "https://pkpvyqvcsmyxcudamerw.supabase.co";
+      const supabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBrcHZ5cXZjc215eGN1ZGFtZXJ3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTMzMjMxMTgsImV4cCI6MjA2ODg5OTExOH0.XHyg3AzXz70Ad1t-E7oiiw0wFhCxUfG1H41HitZgKQY";
       
       console.log('🚀 Calling Supabase function directly:', `${supabaseUrl}/functions/v1/sec-extractor`);
       
@@ -146,7 +142,7 @@ export default function BDCAdminPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold text-gray-900">BDC Data Management</h1>
         <Badge variant="outline" className="text-sm">
-          SEC API v2.0 - Direct Supabase Integration
+          SEC API v2.0 - Hardcoded Values (Temporary Fix)
         </Badge>
       </div>
       
@@ -160,7 +156,7 @@ export default function BDCAdminPage() {
                 ✨ New SEC API Integration Active
               </p>
               <p className="text-xs text-blue-700">
-                Using official SEC APIs for reliable data extraction. Calling Supabase functions directly!
+                Using official SEC APIs for reliable data extraction. Hardcoded values bypassing env var issues!
               </p>
             </div>
           </div>
@@ -168,13 +164,14 @@ export default function BDCAdminPage() {
       </Card>
 
       {/* Debug Info */}
-      <Card className="border-yellow-200 bg-yellow-50">
+      <Card className="border-green-200 bg-green-50">
         <CardContent className="pt-4">
-          <div className="text-xs text-yellow-800">
-            <strong>Debug Info:</strong><br/>
-            Supabase URL: {process.env.NEXT_PUBLIC_SUPABASE_URL ? '✅ Set' : '❌ Missing'}<br/>
-            Supabase Key: {process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? '✅ Set' : '❌ Missing'}<br/>
-            Function URL: {process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/sec-extractor
+          <div className="text-xs text-green-800">
+            <strong>Connection Status:</strong><br/>
+            Supabase URL: ✅ Hardcoded (https://pkpvyqvcsmyxcudamerw.supabase.co)<br/>
+            Supabase Key: ✅ Hardcoded (anon key)<br/>
+            Function URL: https://pkpvyqvcsmyxcudamerw.supabase.co/functions/v1/sec-extractor<br/>
+            <strong>Status: Ready to test!</strong>
           </div>
         </CardContent>
       </Card>
@@ -454,7 +451,7 @@ export default function BDCAdminPage() {
                 <li>• No more memory crashes with large files</li>
                 <li>• 95%+ success rate vs previous parsing failures</li>
                 <li>• 10x faster processing speed</li>
-                <li>• Direct Supabase function calls (no API proxy needed)</li>
+                <li>• Direct Supabase function calls with hardcoded values</li>
               </ul>
             </div>
             <div>
