@@ -59,7 +59,7 @@ export default function BDCAdminPage() {
     setCurrentOperation(action);
     
     try {
-      const response = await fetch('/api/supabase/functions/sec-extractor', {
+      const response = await fetch('/src/pages/api/supabase/functions/sec-extractor', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, ...data })
