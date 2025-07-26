@@ -109,12 +109,10 @@ jobs:
     - name: Deploy Supabase Edge Functions
       run: |
         echo "Deploying Edge Functions..."
-        supabase login --service-role --service-role-key "${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}"
+        supabase login --token "${{ secrets.SUPABASE_ACCESS_TOKEN }}"
         supabase link --project-ref "${{ secrets.SUPABASE_PROJECT_REF }}"
-        supabase functions deploy sec-extractor --project-ref "${{ secrets.SUPABASE_PROJECT_REF }}"
-        supabase functions deploy bdc-api --project-ref "${{ secrets.SUPABASE_PROJECT_REF }}"
-      env:
-        SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        supabase functions deploy sec-extractor
+        supabase functions deploy bdc-api
 
     - name: Wait for function deployment
       run: |
