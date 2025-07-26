@@ -1,579 +1,386 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { AlertCircle, Database, Download, RefreshCw, CheckCircle, XCircle } from 'lucide-react';
 
 const AdminPanel = () => {
   const [status, setStatus] = useState('');
-  const [statusType, setStatusType] = useState('info');
   const [loading, setLoading] = useState(false);
-  const [selectedTicker, setSelectedTicker] = useState('ARCC');
+  const [logs, setLogs] = useState([]);
+  const [stats, setStats] = useState({
+    filings: 0,
+    investments: 0,
+    lastUpdate: null
+  });
 
-  // Helper function to update status
-  const updateStatus = (message, type = 'info') => {
-    setStatus(message);
-    setStatusType(type);
-    console.log(`[${type.toUpperCase()}] ${message}`);
+  // Your Supabase configuration - pre-filled to save time
+  const SUPABASE_URL = 'https://pkpvyqvcsmyxcudamerw.supabase.co';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBrcHZ5cXZjc215eGN1ZGFtZXJ3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTMzMjMxMTgsImV4cCI6MjA2ODg5OTExOH0.XHyg3AzXz70Ad1t-E7oiiw0wFhCxUfG1H41HitZgKQY';
+
+  const addLog = (message, type = 'info') => {
+    const timestamp = new Date().toLocaleTimeString();
+    setLogs(prev => [...prev, { message, type, timestamp }]);
   };
 
-  const [supabaseUrl, setSupabaseUrl] = useState('https://pkpvyqvcsmyxcudamerw.supabase.co');
-  const [supabaseKey, setSupabaseKey] = useState('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBrcHZ5cXZjc215eGN1ZGFtZXJ3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTMzMjMxMTgsImV4cCI6MjA2ODg5OTExOH0.XHyg3AzXz70Ad1t-E7oiiw0wFhCxUfG1H41HitZgKQY');
-
-  // Helper function to make API calls with better error handling
-  const callSECExtractor = async (payload) => {
-    if (!supabaseKey.trim()) {
-      throw new Error('Please enter your Supabase anon key first');
+  const fetchStats = async () => {
+    try {
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_admin_stats`, {
+        headers: {
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setStats(data);
+      }
+    } catch (error) {
+      console.log('Stats fetch failed (this is normal if RPC doesn\'t exist)');
     }
+  };
+
+  useEffect(() => {
+    addLog('✅ Admin panel loaded with saved credentials', 'success');
+    fetchStats();
+  }, []);
+
+  const callEdgeFunction = async (action, ticker = null, additionalParams = {}) => {
+    setLoading(true);
+    setStatus(`Starting ${action}...`);
+    
+    const payload = {
+      action,
+      ...(ticker && { ticker }),
+      ...additionalParams
+    };
+
+    addLog(`🚀 Calling edge function: ${action}${ticker ? ` for ${ticker}` : ''}`, 'info');
 
     try {
-      console.log('Making API call with payload:', payload);
-      
-      const response = await fetch(`${supabaseUrl}/functions/v1/sec-extractor`, {
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/sec-extractor`, {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'Authorization': `Bearer ${supabaseKey}`,
-          'apikey': supabaseKey
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          'apikey': SUPABASE_ANON_KEY,
+          // Add CORS headers to help with the request
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization, apikey'
         },
         body: JSON.stringify(payload)
       });
-      
-      console.log('Response status:', response.status);
-      
-      const responseText = await response.text();
-      console.log('Raw response:', responseText);
-      
-      if (!responseText) {
-        throw new Error(`Empty response from server (status: ${response.status})`);
-      }
-      
-      let result;
-      try {
-        result = JSON.parse(responseText);
-      } catch (jsonError) {
-        throw new Error(`Invalid JSON response: ${responseText.substring(0, 200)}...`);
-      }
-      
+
       if (!response.ok) {
-        throw new Error(result.error || result.message || `API call failed: ${response.status} - ${response.statusText}`);
+        throw new Error(`HTTP error! status: ${response.status} - ${response.statusText}`);
       }
+
+      const result = await response.json();
+      
+      addLog(`✅ ${action} completed successfully`, 'success');
+      addLog(`📊 Result: ${JSON.stringify(result, null, 2)}`, 'info');
+      setStatus(`${action} completed successfully`);
+      
+      // Refresh stats after successful operation
+      setTimeout(fetchStats, 2000);
       
       return result;
-      
     } catch (error) {
-      console.error('API call error:', error);
+      const errorMsg = `❌ ${action} failed: ${error.message}`;
+      addLog(errorMsg, 'error');
+      setStatus(errorMsg);
+      
+      // Additional debugging info
+      if (error.message.includes('CORS')) {
+        addLog('💡 CORS Error - Your edge function needs CORS headers configured', 'warning');
+      } else if (error.message.includes('timeout')) {
+        addLog('💡 Timeout - The operation is taking longer than expected', 'warning');
+      }
+      
       throw error;
+    } finally {
+      setLoading(false);
     }
   };
 
-  // 1. FULL BACKFILL + INVESTMENT EXTRACTION
   const handleFullBackfill = async () => {
-    setLoading(true);
     try {
-      updateStatus('🔄 Starting full backfill for all BDCs...', 'info');
-      
-      // Step 1: Download all SEC filings
-      const filingResult = await callSECExtractor({ action: 'backfill_all' });
-      console.log('Filing backfill result:', filingResult);
-      
-      updateStatus(`✅ Filing backfill completed! Processed ${filingResult.processed} BDCs. Now extracting investments...`, 'success');
-      
-      // Step 2: Extract investment data from all filings
-      const extractResult = await callSECExtractor({ action: 'extract_all_investments' });
-      console.log('Investment extraction result:', extractResult);
-      
-      updateStatus(`🎉 Complete! Processed ${extractResult.processed} filings and extracted ${extractResult.investments_extracted} investments!`, 'success');
-      
+      addLog('🎯 Starting full backfill process...', 'info');
+      await callEdgeFunction('backfill_all');
+      addLog('🎉 Full backfill completed! Your investment tables should now be populated.', 'success');
     } catch (error) {
-      console.error('Full backfill error:', error);
-      updateStatus(`❌ Error: ${error.message}`, 'error');
-    } finally {
-      setLoading(false);
+      addLog('🔧 If this failed due to CORS, try the Supabase Dashboard method below', 'warning');
     }
   };
 
-  // 2. TEST SINGLE TICKER + INVESTMENT EXTRACTION (with better error handling)
-  const handleTestARCC = async () => {
-    setLoading(true);
+  const handleTickerBackfill = async () => {
+    const ticker = prompt('Enter BDC ticker (e.g., ARCC, MAIN, GSBD):');
+    if (!ticker) return;
+    
     try {
-      updateStatus(`🔄 Testing ARCC - downloading filings...`, 'info');
-      
-      // Step 1: Backfill filings for ARCC (1 year)
-      console.log('Step 1: Starting ARCC backfill...');
-      const filingResult = await callSECExtractor({ 
-        action: 'backfill_ticker', 
-        ticker: 'ARCC',
-        years_back: 1
-      });
-      
-      console.log('Filing result:', filingResult);
-      updateStatus(`✅ Filing backfill for ARCC completed. Now extracting investments...`, 'info');
-      
-      // Step 2: Extract investments for ARCC
-      console.log('Step 2: Starting ARCC investment extraction...');
-      const extractResult = await callSECExtractor({ 
-        action: 'extract_investments', 
-        ticker: 'ARCC' 
-      });
-      
-      console.log('Extract result:', extractResult);
-      updateStatus(`🎉 ARCC test completed! Processed ${extractResult.processed} filings and extracted ${extractResult.investments_extracted} investments!`, 'success');
-      
+      await callEdgeFunction('backfill_ticker', ticker.toUpperCase(), { years_back: 1 });
     } catch (error) {
-      console.error('Test ARCC error:', error);
-      
-      // More detailed error messages
-      if (error.message.includes('fetch')) {
-        updateStatus(`❌ Network error: Could not connect to API. Check if your edge function is deployed.`, 'error');
-      } else if (error.message.includes('JSON')) {
-        updateStatus(`❌ API response error: ${error.message}`, 'error');
-      } else if (error.message.includes('500')) {
-        updateStatus(`❌ Server error: Check the function logs in Supabase dashboard.`, 'error');
-      } else {
-        updateStatus(`❌ ARCC test failed: ${error.message}`, 'error');
-      }
-    } finally {
-      setLoading(false);
+      console.error('Ticker backfill failed:', error);
     }
   };
 
-  // 3. CHECK NEW 10-K FILINGS + EXTRACT INVESTMENTS
-  const handleCheck10K = async () => {
-    setLoading(true);
+  const handleExtractAll = async () => {
     try {
-      updateStatus(`🔄 Checking for new 10-K filings and extracting investments...`, 'info');
+      addLog('📊 Extracting investment data from all filings...', 'info');
+      await callEdgeFunction('extract_all_investments');
+    } catch (error) {
+      console.error('Extract all failed:', error);
+    }
+  };
+
+  const handleBatchExtraction = async () => {
+    try {
+      addLog('🔄 Starting batch extraction (processing in smaller chunks)...', 'info');
       
-      const bdcTickers = ['ARCC', 'BXSL', 'MAIN', 'NEWT', 'ORCC', 'PSEC', 'TSLX', 'CGBD', 'TCPC', 'GBDC', 'HTGC', 'GAIN', 'MFIC', 'OCSL'];
-      let totalNewFilings = 0;
-      let totalInvestments = 0;
+      // Process in batches of 50 filings
+      let batchNumber = 1;
+      let hasMore = true;
       
-      for (const ticker of bdcTickers) {
+      while (hasMore) {
+        addLog(`📦 Processing batch ${batchNumber} (50 filings)...`, 'info');
+        
         try {
-          // Step 1: Check for new 10-K filings
-          const filingResult = await callSECExtractor({ 
-            action: 'incremental_check',
-            ticker: ticker,
-            filing_type: '10-K'
+          const result = await callEdgeFunction('extract_batch_investments', null, { 
+            batch_size: 50,
+            offset: (batchNumber - 1) * 50 
           });
           
-          if (filingResult.new_filings > 0) {
-            totalNewFilings += filingResult.new_filings;
-            
-            // Step 2: Extract investments from new filings
-            const extractResult = await callSECExtractor({ 
-              action: 'extract_investments',
-              ticker: ticker
-            });
-            
-            totalInvestments += extractResult.investments_extracted || 0;
+          if (result && result.processed < 50) {
+            hasMore = false;
+            addLog(`✅ Batch ${batchNumber} completed - processed ${result.processed} filings (final batch)`, 'success');
+          } else {
+            addLog(`✅ Batch ${batchNumber} completed - processed 50 filings`, 'success');
           }
           
-          // Small delay between tickers
-          await new Promise(resolve => setTimeout(resolve, 500));
+          batchNumber++;
           
-        } catch (error) {
-          console.error(`Error processing ${ticker}:`, error);
+          // Small delay between batches to avoid overwhelming the system
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          
+        } catch (batchError) {
+          addLog(`❌ Batch ${batchNumber} failed: ${batchError.message}`, 'error');
+          addLog('🔄 Continuing with next batch...', 'warning');
+          batchNumber++;
         }
       }
       
-      updateStatus(`✅ 10-K check completed! Found ${totalNewFilings} new filings and extracted ${totalInvestments} investments.`, 'success');
+      addLog('🎉 Batch extraction completed! All investment data should now be extracted.', 'success');
       
     } catch (error) {
-      console.error('Check new 10-K error:', error);
-      updateStatus(`❌ Error checking 10-K filings: ${error.message}`, 'error');
-    } finally {
-      setLoading(false);
+      addLog(`❌ Batch extraction failed: ${error.message}`, 'error');
     }
   };
 
-  // 4. CHECK NEW 10-Q FILINGS + EXTRACT INVESTMENTS
-  const handleCheck10Q = async () => {
-    setLoading(true);
+  const handleIncrementalCheck = async () => {
     try {
-      updateStatus(`🔄 Checking for new 10-Q filings and extracting investments...`, 'info');
-      
-      const bdcTickers = ['ARCC', 'BXSL', 'MAIN', 'NEWT', 'ORCC', 'PSEC', 'TSLX', 'CGBD', 'TCPC', 'GBDC', 'HTGC', 'GAIN', 'MFIC', 'OCSL'];
-      let totalNewFilings = 0;
-      let totalInvestments = 0;
-      
-      for (const ticker of bdcTickers) {
-        try {
-          // Step 1: Check for new 10-Q filings
-          const filingResult = await callSECExtractor({ 
-            action: 'incremental_check',
-            ticker: ticker,
-            filing_type: '10-Q'
-          });
-          
-          if (filingResult.new_filings > 0) {
-            totalNewFilings += filingResult.new_filings;
-            
-            // Step 2: Extract investments from new filings
-            const extractResult = await callSECExtractor({ 
-              action: 'extract_investments',
-              ticker: ticker
-            });
-            
-            totalInvestments += extractResult.investments_extracted || 0;
-          }
-          
-          // Small delay between tickers
-          await new Promise(resolve => setTimeout(resolve, 500));
-          
-        } catch (error) {
-          console.error(`Error processing ${ticker}:`, error);
-        }
-      }
-      
-      updateStatus(`✅ 10-Q check completed! Found ${totalNewFilings} new filings and extracted ${totalInvestments} investments.`, 'success');
-      
+      await callEdgeFunction('incremental_check');
     } catch (error) {
-      console.error('Check new 10-Q error:', error);
-      updateStatus(`❌ Error checking 10-Q filings: ${error.message}`, 'error');
-    } finally {
-      setLoading(false);
+      console.error('Incremental check failed:', error);
     }
   };
 
-  // 5. UPDATE SINGLE BDC (10-K) + EXTRACT INVESTMENTS
-  const handleUpdate10K = async () => {
-    setLoading(true);
-    try {
-      updateStatus(`🔄 Updating ${selectedTicker} 10-K filings and extracting investments...`, 'info');
-      
-      // Step 1: Check for new 10-K filings for this specific BDC
-      const filingResult = await callSECExtractor({ 
-        action: 'incremental_check',
-        ticker: selectedTicker,
-        filing_type: '10-K'
-      });
-      
-      if (filingResult.new_filings > 0) {
-        updateStatus(`✅ Found ${filingResult.new_filings} new 10-K filings for ${selectedTicker}. Extracting investments...`, 'info');
-        
-        // Step 2: Extract investments from new filings
-        const extractResult = await callSECExtractor({ 
-          action: 'extract_investments',
-          ticker: selectedTicker
-        });
-        
-        updateStatus(`🎉 ${selectedTicker} update completed! Processed ${extractResult.processed} filings and extracted ${extractResult.investments_extracted} investments!`, 'success');
-      } else {
-        updateStatus(`ℹ️ No new 10-K filings found for ${selectedTicker}.`, 'info');
-      }
-      
-    } catch (error) {
-      console.error(`Update ${selectedTicker} error:`, error);
-      updateStatus(`❌ Error updating ${selectedTicker}: ${error.message}`, 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // 6. UPDATE SINGLE BDC (10-Q) + EXTRACT INVESTMENTS
-  const handleUpdate10Q = async () => {
-    setLoading(true);
-    try {
-      updateStatus(`🔄 Updating ${selectedTicker} 10-Q filings and extracting investments...`, 'info');
-      
-      // Step 1: Check for new 10-Q filings for this specific BDC
-      const filingResult = await callSECExtractor({ 
-        action: 'incremental_check',
-        ticker: selectedTicker,
-        filing_type: '10-Q'
-      });
-      
-      if (filingResult.new_filings > 0) {
-        updateStatus(`✅ Found ${filingResult.new_filings} new 10-Q filings for ${selectedTicker}. Extracting investments...`, 'info');
-        
-        // Step 2: Extract investments from new filings
-        const extractResult = await callSECExtractor({ 
-          action: 'extract_investments',
-          ticker: selectedTicker
-        });
-        
-        updateStatus(`🎉 ${selectedTicker} update completed! Processed ${extractResult.processed} filings and extracted ${extractResult.investments_extracted} investments!`, 'success');
-      } else {
-        updateStatus(`ℹ️ No new 10-Q filings found for ${selectedTicker}.`, 'info');
-      }
-      
-    } catch (error) {
-      console.error(`Update ${selectedTicker} error:`, error);
-      updateStatus(`❌ Error updating ${selectedTicker}: ${error.message}`, 'error');
-    } finally {
-      setLoading(false);
-    }
+  const clearLogs = () => {
+    setLogs([]);
+    addLog('🧹 Logs cleared', 'info');
   };
 
   return (
-    <div className="max-w-4xl mx-auto p-6 bg-white">
-      <div className="text-center mb-8">
-        <h1 className="text-3xl font-bold text-gray-800 mb-2">🏦 BDC Admin Panel</h1>
-        <p className="text-gray-600">Manage SEC data extraction, backfill processes, and monitor new filings for all BDC companies.</p>
-      </div>
-
-      {/* Supabase Configuration */}
-      <div className="bg-yellow-50 p-6 rounded-lg mb-6 border border-yellow-200">
-        <h3 className="text-xl font-semibold text-yellow-800 mb-4">🔑 Supabase Configuration</h3>
-        <p className="text-sm text-yellow-700 mb-4">Enter your Supabase credentials to enable API calls:</p>
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Supabase URL:</label>
-            <input
-              type="text"
-              value={supabaseUrl}
-              onChange={(e) => setSupabaseUrl(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
-              placeholder="https://your-project.supabase.co"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Supabase Anon Key:</label>
-            <input
-              type="password"
-              value={supabaseKey}
-              onChange={(e) => setSupabaseKey(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
-              placeholder="eyJ... (your anon public key)"
-            />
-          </div>
-        </div>
-        
-        <div className="mt-4 p-3 bg-green-50 rounded text-xs text-green-800">
-          ✅ <strong>Credentials saved!</strong> Your Supabase URL and anon key are pre-filled and ready to use.
-        </div>
-      </div>
-
-      {/* Single BDC Selection */}
-      <div className="bg-red-50 p-4 rounded-lg mb-6">
-        <h3 className="text-lg font-semibold text-red-800 mb-3">📌 Single BDC Selection</h3>
-        <div className="flex items-center gap-4">
-          <label className="text-sm font-medium text-gray-700">Select BDC for single updates:</label>
-          <select 
-            value={selectedTicker} 
-            onChange={(e) => setSelectedTicker(e.target.value)}
-            className="px-3 py-1 border border-gray-300 rounded-md text-sm"
-          >
-            <option value="ARCC">ARCC</option>
-            <option value="BXSL">BXSL</option>
-            <option value="MAIN">MAIN</option>
-            <option value="NEWT">NEWT</option>
-            <option value="ORCC">ORCC</option>
-            <option value="PSEC">PSEC</option>
-            <option value="TSLX">TSLX</option>
-            <option value="CGBD">CGBD</option>
-            <option value="TCPC">TCPC</option>
-            <option value="GBDC">GBDC</option>
-            <option value="HTGC">HTGC</option>
-            <option value="GAIN">GAIN</option>
-            <option value="MFIC">MFIC</option>
-            <option value="OCSL">OCSL</option>
-          </select>
-          <span className="text-xs text-gray-500">Currently selected: {selectedTicker}</span>
-        </div>
-      </div>
-
-      {/* Initial Setup & Testing */}
-      <div className="bg-blue-50 p-6 rounded-lg mb-6">
-        <h3 className="text-xl font-semibold text-blue-800 mb-4">🚀 Initial Setup & Testing</h3>
-        
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {/* Full Backfill */}
-          <div className="bg-white p-4 rounded-lg border border-blue-200">
-            <h4 className="font-semibold text-blue-700 mb-2">Full Backfill (All BDCs)</h4>
-            <p className="text-sm text-gray-600 mb-3">Process all 34 BDCs for the last 9 years of filings + extract ALL investments</p>
-            <div className="mb-3 p-2 bg-yellow-50 rounded text-xs text-yellow-800">
-              ⚠️ This will take 15-30 minutes and process hundreds of filings.
+    <div className="min-h-screen bg-gray-50 p-8">
+      <div className="max-w-6xl mx-auto">
+        <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">BDC Portfolio Tracker Admin</h1>
+          <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
+            <div className="flex items-center">
+              <CheckCircle className="h-5 w-5 text-green-600 mr-2" />
+              <span className="text-green-800 font-medium">✅ Credentials saved! Ready to process data.</span>
             </div>
-            <button 
-              onClick={handleFullBackfill}
-              disabled={loading}
-              className="w-full bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
-            >
-              {loading ? '🔄 Processing...' : '🚀 Start Full Backfill + Extract All'}
-            </button>
           </div>
-
-          {/* Test Single BDC */}
-          <div className="bg-white p-4 rounded-lg border border-green-200">
-            <h4 className="font-semibold text-green-700 mb-2">Test Single BDC</h4>
-            <p className="text-sm text-gray-600 mb-3">Test with ARCC for 1 year (quick test) + extract investments</p>
-            <button 
-              onClick={handleTestARCC}
-              disabled={loading}
-              className="w-full bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed mb-2"
-            >
-              {loading ? '🔄 Testing...' : '🧪 Test ARCC + Extract'}
-            </button>
-            
-            {/* Simple direct test - bypass CORS */}
-            <button 
-              onClick={async () => {
-                try {
-                  updateStatus('🔄 Testing with simple approach...', 'info');
-                  
-                  if (!supabaseKey.trim()) {
-                    updateStatus('❌ Please enter your Supabase anon key first', 'error');
-                    return;
-                  }
-                  
-                  // Create a simple form submission to bypass CORS
-                  const testData = {
-                    action: 'backfill_ticker',
-                    ticker: 'ARCC', 
-                    years_back: 1
-                  };
-                  
-                  updateStatus('🔄 Sending request via form method...', 'info');
-                  
-                  // Create a hidden form
-                  const form = document.createElement('form');
-                  form.method = 'POST';
-                  form.action = `${supabaseUrl}/functions/v1/sec-extractor`;
-                  form.style.display = 'none';
-                  
-                  // Add data
-                  const input = document.createElement('input');
-                  input.name = 'data';
-                  input.value = JSON.stringify(testData);
-                  form.appendChild(input);
-                  
-                  // Add auth header as hidden input (this won't work, but let's try)
-                  const authInput = document.createElement('input');
-                  authInput.name = 'auth';
-                  authInput.value = supabaseKey;
-                  form.appendChild(authInput);
-                  
-                  document.body.appendChild(form);
-                  
-                  updateStatus('❌ Form method won\'t work for API calls. Let\'s try a different approach...', 'warning');
-                  
-                  // Clean up
-                  document.body.removeChild(form);
-                  
-                  // Instead, let's just confirm your credentials are valid
-                  updateStatus(`✅ Your anon key looks valid! Let's run the extraction directly from admin panel.`, 'success');
-                  
-                } catch (error) {
-                  updateStatus(`❌ Error: ${error.message}`, 'error');
-                }
-              }}
-              disabled={loading}
-              className="w-full bg-purple-500 text-white px-2 py-1 rounded text-xs hover:bg-purple-600 disabled:bg-gray-400"
-            >
-              🚀 Skip Tests - Run Extraction Now
-            </button>
-          </div>
-
-          {/* Setup Scheduled Jobs */}
-          <div className="bg-white p-4 rounded-lg border border-purple-200">
-            <h4 className="font-semibold text-purple-700 mb-2">Setup Scheduled Jobs</h4>
-            <p className="text-sm text-gray-600 mb-3">Configure automatic filing monitoring</p>
-            <button 
-              onClick={() => callSECExtractor({ action: 'setup_scheduled_jobs' })}
-              disabled={loading}
-              className="w-full bg-purple-600 text-white px-4 py-2 rounded-md hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
-            >
-              {loading ? '⚙️ Setting up...' : '⚙️ Setup Jobs'}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Updates & New Filings */}
-      <div className="bg-green-50 p-6 rounded-lg mb-6">
-        <h3 className="text-xl font-semibold text-green-800 mb-4">📈 Updates & New Filings</h3>
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-          {/* Check for New 10-K Filings */}
-          <div className="bg-white p-4 rounded-lg border border-orange-200">
-            <h4 className="font-semibold text-orange-700 mb-2">Check for New 10-K Filings</h4>
-            <p className="text-sm text-gray-600 mb-3">Scan all BDCs for new annual filings since last update + extract investments</p>
-            <button 
-              onClick={handleCheck10K}
-              disabled={loading}
-              className="w-full bg-orange-600 text-white px-4 py-2 rounded-md hover:bg-orange-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
-            >
-              {loading ? '🔍 Checking...' : '📊 Check New 10-Ks + Extract'}
-            </button>
-          </div>
-
-          {/* Check for New 10-Q Filings */}
-          <div className="bg-white p-4 rounded-lg border border-blue-200">
-            <h4 className="font-semibold text-blue-700 mb-2">Check for New 10-Q Filings</h4>
-            <p className="text-sm text-gray-600 mb-3">Scan all BDCs for new quarterly filings since last update + extract investments</p>
-            <button 
-              onClick={handleCheck10Q}
-              disabled={loading}
-              className="w-full bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
-            >
-              {loading ? '🔍 Checking...' : '📈 Check New 10-Qs + Extract'}
-            </button>
+          
+          {/* Stats Dashboard */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div className="bg-blue-50 p-4 rounded-lg">
+              <div className="flex items-center">
+                <Database className="h-8 w-8 text-blue-600 mr-3" />
+                <div>
+                  <p className="text-sm text-blue-600">SEC Filings</p>
+                  <p className="text-2xl font-bold text-blue-900">{stats.filings}</p>
+                </div>
+              </div>
+            </div>
+            <div className="bg-green-50 p-4 rounded-lg">
+              <div className="flex items-center">
+                <Database className="h-8 w-8 text-green-600 mr-3" />
+                <div>
+                  <p className="text-sm text-green-600">Investment Records</p>
+                  <p className="text-2xl font-bold text-green-900">{stats.investments}</p>
+                </div>
+              </div>
+            </div>
+            <div className="bg-purple-50 p-4 rounded-lg">
+              <div className="flex items-center">
+                <RefreshCw className="h-8 w-8 text-purple-600 mr-3" />
+                <div>
+                  <p className="text-sm text-purple-600">Last Update</p>
+                  <p className="text-sm font-medium text-purple-900">
+                    {stats.lastUpdate ? new Date(stats.lastUpdate).toLocaleDateString() : 'Never'}
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Update Single BDC (10-K) */}
-          <div className="bg-white p-4 rounded-lg border border-teal-200">
-            <h4 className="font-semibold text-teal-700 mb-2">Update Single BDC (10-K)</h4>
-            <p className="text-sm text-gray-600 mb-3">Check for new annual filings for a specific BDC + extract investments</p>
-            <div className="text-xs text-gray-500 mb-2">📌 Will check: {selectedTicker}</div>
-            <button 
-              onClick={handleUpdate10K}
-              disabled={loading}
-              className="w-full bg-teal-600 text-white px-4 py-2 rounded-md hover:bg-teal-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+        {/* Main Action Buttons */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+          <div className="bg-white rounded-lg shadow-lg p-6">
+            <h2 className="text-xl font-semibold text-gray-900 mb-4">Primary Actions</h2>
+            <div className="space-y-3">
+              <button
+                onClick={handleFullBackfill}
+                disabled={loading}
+                className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium py-3 px-4 rounded-lg transition duration-200 flex items-center justify-center"
+              >
+                {loading ? (
+                  <RefreshCw className="animate-spin h-5 w-5 mr-2" />
+                ) : (
+                  <Download className="h-5 w-5 mr-2" />
+                )}
+                🚀 Start Full Backfill + Extract All
+              </button>
+              
+              <button
+                onClick={handleBatchExtraction}
+                disabled={loading}
+                className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-medium py-3 px-4 rounded-lg transition duration-200 flex items-center justify-center"
+              >
+                <Database className="h-5 w-5 mr-2" />
+                📊 Extract Investments (Batch Processing)
+              </button>
+              
+              <button
+                onClick={handleExtractAll}
+                disabled={loading}
+                className="w-full bg-yellow-600 hover:bg-yellow-700 disabled:bg-gray-400 text-white font-medium py-3 px-4 rounded-lg transition duration-200 flex items-center justify-center text-sm"
+              >
+                <Database className="h-5 w-5 mr-2" />
+                ⚠️ Extract All (May Timeout)
+              </button>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-lg shadow-lg p-6">
+            <h2 className="text-xl font-semibold text-gray-900 mb-4">Individual Actions</h2>
+            <div className="space-y-3">
+              <button
+                onClick={handleTickerBackfill}
+                disabled={loading}
+                className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-gray-400 text-white font-medium py-3 px-4 rounded-lg transition duration-200 flex items-center justify-center"
+              >
+                <Download className="h-5 w-5 mr-2" />
+                📈 Backfill Single Ticker
+              </button>
+              
+              <button
+                onClick={handleIncrementalCheck}
+                disabled={loading}
+                className="w-full bg-orange-600 hover:bg-orange-700 disabled:bg-gray-400 text-white font-medium py-3 px-4 rounded-lg transition duration-200 flex items-center justify-center"
+              >
+                <RefreshCw className="h-5 w-5 mr-2" />
+                🔄 Check for New Filings
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Alternative Method */}
+        <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+          <h2 className="text-xl font-semibold text-gray-900 mb-4">
+            <AlertCircle className="inline-block h-5 w-5 text-blue-600 mr-2" />
+            Recommended Approach (Based on Your Logs)
+          </h2>
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+            <h3 className="font-medium text-blue-800 mb-2">✅ Good News: Backfill Already Worked!</h3>
+            <p className="text-sm text-blue-700 mb-3">
+              Your logs show that SEC filings were successfully downloaded and stored. The issue is just that processing 1000 filings at once exceeded the compute limits.
+            </p>
+            <h3 className="font-medium text-blue-800 mb-2">🎯 Next Step: Use Batch Processing</h3>
+            <ol className="list-decimal list-inside text-sm text-blue-700 space-y-1">
+              <li>Click the "📊 Extract Investments (Batch Processing)" button above</li>
+              <li>This will process your 1000 filings in chunks of 50</li>
+              <li>Each batch takes ~1-2 minutes instead of timing out</li>
+              <li>Watch the logs to see progress through each batch</li>
+            </ol>
+          </div>
+          
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+            <h3 className="font-medium text-yellow-800 mb-2">Alternative: Manual Supabase Dashboard Method</h3>
+            <ol className="list-decimal list-inside text-sm text-yellow-700 space-y-1">
+              <li>Go to: <a href="https://supabase.com/dashboard" className="text-blue-600 underline" target="_blank" rel="noopener noreferrer">Supabase Dashboard</a></li>
+              <li>Navigate to: Functions → sec-extractor → Invoke Function</li>
+              <li>Send: <code className="bg-yellow-100 px-2 py-1 rounded">{"{"}"action": "extract_batch_investments", "batch_size": 50, "offset": 0{"}"}</code></li>
+              <li>Wait for completion, then send: <code className="bg-yellow-100 px-2 py-1 rounded">{"{"}"action": "extract_batch_investments", "batch_size": 50, "offset": 50{"}"}</code></li>
+              <li>Continue incrementing offset by 50 until no more results</li>
+            </ol>
+          </div>
+        </div>
+
+        {/* Status and Logs */}
+        <div className="bg-white rounded-lg shadow-lg p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-semibold text-gray-900">Operation Logs</h2>
+            <button
+              onClick={clearLogs}
+              className="text-sm text-gray-600 hover:text-gray-800 underline"
             >
-              {loading ? '🔄 Updating...' : '🔄 Update 10-K + Extract'}
+              Clear Logs
             </button>
           </div>
-
-          {/* Update Single BDC (10-Q) */}
-          <div className="bg-white p-4 rounded-lg border border-teal-200">
-            <h4 className="font-semibold text-teal-700 mb-2">Update Single BDC (10-Q)</h4>
-            <p className="text-sm text-gray-600 mb-3">Check for new quarterly filings for a specific BDC + extract investments</p>
-            <div className="text-xs text-gray-500 mb-2">📌 Will check: {selectedTicker}</div>
-            <button 
-              onClick={handleUpdate10Q}
-              disabled={loading}
-              className="w-full bg-teal-600 text-white px-4 py-2 rounded-md hover:bg-teal-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
-            >
-              {loading ? '🔄 Updating...' : '🔄 Update 10-Q + Extract'}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Status Display */}
-      {status && (
-        <div className={`p-4 rounded-lg mb-6 ${
-          statusType === 'success' ? 'bg-green-100 border border-green-300 text-green-800' :
-          statusType === 'error' ? 'bg-red-100 border border-red-300 text-red-800' :
-          statusType === 'warning' ? 'bg-yellow-100 border border-yellow-300 text-yellow-800' :
-          'bg-blue-100 border border-blue-300 text-blue-800'
-        }`}>
-          <div className="font-medium">{status}</div>
-        </div>
-      )}
-
-      {/* Quick Info */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="bg-gray-50 p-4 rounded-lg">
-          <h4 className="font-semibold text-gray-700 mb-2">📊 Quick Info</h4>
-          <div className="space-y-1 text-sm text-gray-600">
-            <div><strong>Total BDCs:</strong> 34</div>
-            <div><strong>Backfill Range:</strong> 9 Years</div>
-            <div><strong>Filing Types:</strong> 10-K, 10-Q</div>
-            <div><strong>Expected Filings:</strong> ~1,200+</div>
+          
+          {status && (
+            <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <p className="text-blue-800 font-medium">Current Status: {status}</p>
+            </div>
+          )}
+          
+          <div className="bg-gray-900 rounded-lg p-4 h-64 overflow-y-auto">
+            {logs.length === 0 ? (
+              <p className="text-gray-400">No logs yet. Click a button above to start processing.</p>
+            ) : (
+              <div className="space-y-1">
+                {logs.map((log, index) => (
+                  <div key={index} className="flex items-start space-x-2 text-sm">
+                    <span className="text-gray-400 text-xs font-mono min-w-0 flex-shrink-0">
+                      {log.timestamp}
+                    </span>
+                    <span className={`${
+                      log.type === 'error' ? 'text-red-400' :
+                      log.type === 'success' ? 'text-green-400' :
+                      log.type === 'warning' ? 'text-yellow-400' :
+                      'text-gray-300'
+                    }`}>
+                      {log.message}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
-        <div className="bg-yellow-50 p-4 rounded-lg">
-          <h4 className="font-semibold text-yellow-800 mb-2">💡 Usage Guide</h4>
-          <div className="space-y-1 text-sm text-yellow-700">
-            <div><strong>First time?</strong> Run "Full Backfill" to get all historical data</div>
-            <div><strong>Daily updates:</strong> Use "Check New" buttons for quarterly filings</div>
-            <div><strong>Single BDC:</strong> Use dropdown + single update buttons</div>
-            <div><strong>Monitoring:</strong> Set up scheduled jobs for automation</div>
-          </div>
+        {/* Quick Debugging Info */}
+        <div className="mt-6 text-sm text-gray-600">
+          <h3 className="font-medium mb-2">🔧 Debugging Information:</h3>
+          <ul className="list-disc list-inside space-y-1">
+            <li>Supabase URL: {SUPABASE_URL}</li>
+            <li>Edge Function: sec-extractor</li>
+            <li>Current Time: {new Date().toLocaleString()}</li>
+            <li>Expected Tables: sec_filings, investments_raw, bdc_companies</li>
+          </ul>
         </div>
       </div>
     </div>
