@@ -125,6 +125,21 @@ Deno.serve(async (req) => {
           }, async () => await setupScheduledJobs(supabase));
           break;
 
+        // NEW CASES FOR INVESTMENT EXTRACTION
+        case 'extract_investments':
+          response = await Sentry.startSpan({
+            name: 'extractInvestments',
+            op: 'sec.extract'
+          }, async () => await extractInvestmentsFromFilings(supabase, ticker));
+          break;
+
+        case 'extract_all_investments':
+          response = await Sentry.startSpan({
+            name: 'extractAllInvestments', 
+            op: 'sec.extract'
+          }, async () => await extractAllInvestments(supabase));
+          break;
+
         default:
           throw new Error(`Unknown action: ${action}`);
       }
@@ -266,6 +281,323 @@ async function fetchSECFilings(cik, yearsBack) {
     }
 
     const data = await response.json();
+    const filings = [];
+
+    if (data.filings && data.filings.recent) {
+      const recent = data.filings.recent;
+
+      for (let i = 0; i < recent.form.length; i++) {
+        const formType = recent.form[i];
+        const filingDate = recent.filingDate[i];
+
+        // Only process matching filing type after cutoff date
+        if (formType === filingType && new Date(filingDate) > cutoffDate) {
+          // FIXED: Add null safety for accession number processing
+          const accessionNumber = recent.accessionNumber[i];
+          const primaryDocument = recent.primaryDocument[i];
+
+          if (accessionNumber && primaryDocument) {
+            filings.push({
+              cik: cik,
+              accessionNumber: accessionNumber,
+              filingDate: filingDate,
+              formType: formType,
+              periodOfReport: recent.reportDate[i],
+              documentUrl: `https://www.sec.gov/Archives/edgar/data/${cik}/${safeExtractAccession(accessionNumber)}/${primaryDocument}`
+            });
+          }
+        }
+      }
+    }
+
+    // Sort by filing date (newest first for incremental)
+    filings.sort((a, b) => new Date(b.filingDate).getTime() - new Date(a.filingDate).getTime());
+
+    console.log(`Found ${filings.length} recent ${filingType} filings for CIK ${cik}`);
+    return filings;
+
+  } catch (error) {
+    console.error(`Error fetching recent SEC data for CIK ${cik}:`, error);
+    throw error;
+  }
+}
+
+async function setupScheduledJobs(supabase) {
+  console.log('Setting up scheduled jobs for all active BDCs');
+
+  try {
+    // FIXED: Get all active BDCs with NEW fiscal year-end columns
+    const { data: bdcs, error } = await supabase
+      .from('bdc_universe')
+      .select('ticker, company_name, fiscal_year_end_month, fiscal_year_end_day')
+      .eq('is_active', true);
+
+    if (error) {
+      throw new Error(`Failed to fetch BDCs: ${error.message}`);
+    }
+
+    let jobsCreated = 0;
+
+    for (const bdc of bdcs) {
+      // FIXED: Check for NEW fiscal year-end columns
+      if (!bdc.fiscal_year_end_month || !bdc.fiscal_year_end_day) {
+        console.warn(`Skipping ${bdc.ticker} - no fiscal year-end date`);
+        continue;
+      }
+
+      // FIXED: Calculate filing due dates using the NEW database function
+      const { data: filingDates } = await supabase
+        .rpc('calculate_next_filing_dates', {
+          fye_month: bdc.fiscal_year_end_month,
+          fye_day: bdc.fiscal_year_end_day
+        });
+
+      // Create scheduled jobs for each filing type
+      for (const filingDate of filingDates) {
+        const { error: jobError } = await supabase
+          .from('scheduled_jobs')
+          .upsert({
+            ticker: bdc.ticker,
+            job_type: filingDate.filing_type,
+            scheduled_date: filingDate.quarter_end,
+            next_run_at: filingDate.due_date
+          }, {
+            onConflict: 'ticker,job_type,scheduled_date'
+          });
+
+        if (jobError) {
+          console.error(`Failed to create job for ${bdc.ticker} ${filingDate.filing_type}:`, jobError);
+        } else {
+          jobsCreated++;
+          console.log(`Created scheduled job: ${bdc.ticker} ${filingDate.filing_type} due ${filingDate.due_date}`);
+        }
+      }
+    }
+
+    // Log completion
+    await supabase.from('processing_logs').insert({
+      log_level: 'info',
+      message: 'Scheduled jobs setup completed',
+      details: {
+        jobs_created: jobsCreated,
+        bdcs_processed: bdcs.length
+      }
+    });
+
+    return new Response(JSON.stringify({
+      message: 'Scheduled jobs setup completed',
+      jobs_created: jobsCreated,
+      bdcs_processed: bdcs.length
+    }), {
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/json'
+      }
+    });
+
+  } catch (error) {
+    console.error('Error setting up scheduled jobs:', error);
+
+    // Log error
+    await supabase.from('processing_logs').insert({
+      log_level: 'error',
+      message: 'Failed to setup scheduled jobs',
+      details: {
+        error: error.message
+      }
+    });
+
+    throw error;
+  }
+}
+
+function getQuarterYear(filingDate, filingType) {
+  const date = new Date(filingDate);
+  const year = date.getFullYear();
+
+  if (filingType === '10-K') {
+    return `Q4-${year}`;
+  } else {
+    const month = date.getMonth() + 1;
+    if (month <= 3) return `Q1-${year}`;
+    if (month <= 6) return `Q2-${year}`;
+    if (month <= 9) return `Q3-${year}`;
+    return `Q4-${year}`;
+  }
+}
+
+// NEW INVESTMENT EXTRACTION FUNCTIONS
+// Add these functions at the very end of your index.ts file
+
+async function extractInvestmentsFromFilings(supabase, ticker) {
+  console.log(`[SENTRY] Starting investment extraction for ${ticker || 'all tickers'}`);
+  
+  try {
+    // Get filings that haven't been processed for investments yet
+    let query = supabase
+      .from('filings')
+      .select('*')
+      .eq('status', 'pending')
+      .order('filing_date', { ascending: false });
+    
+    if (ticker) {
+      query = query.eq('ticker', ticker);
+    }
+    
+    const { data: filings, error } = await query;
+    
+    if (error) throw error;
+    
+    console.log(`Found ${filings.length} filings to process for investment extraction`);
+    
+    let totalProcessed = 0;
+    let totalInvestments = 0;
+    let errorCount = 0;
+    
+    for (const filing of filings) {
+      try {
+        console.log(`Processing ${filing.ticker} - ${filing.accession_number}`);
+        
+        const investments = await extractInvestmentsFromSingleFiling(supabase, filing);
+        
+        if (investments.length > 0) {
+          totalInvestments += investments.length;
+          console.log(`✅ Extracted ${investments.length} investments from ${filing.ticker}`);
+        } else {
+          console.log(`ℹ️ No investments found in ${filing.ticker} filing`);
+        }
+        
+        // Mark filing as processed
+        await supabase
+          .from('filings')
+          .update({ 
+            status: 'processed',
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', filing.id);
+        
+        totalProcessed++;
+        
+        // Small delay to be respectful to servers
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+      } catch (error) {
+        console.error(`Error processing ${filing.ticker}:`, error);
+        errorCount++;
+        
+        // Mark filing as error
+        await supabase
+          .from('filings')
+          .update({ 
+            status: 'error',
+            error_message: error.message,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', filing.id);
+      }
+    }
+    
+    const result = {
+      message: 'Investment extraction completed',
+      processed: totalProcessed,
+      investments_extracted: totalInvestments,
+      errors: errorCount
+    };
+    
+    console.log(`[SENTRY] Investment extraction completed:`, result);
+    
+    return new Response(JSON.stringify(result), {
+      status: 200,
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+  } catch (error) {
+    console.error(`[SENTRY] Fatal error in investment extraction:`, error);
+    throw error;
+  }
+}
+
+async function extractAllInvestments(supabase) {
+  return await extractInvestmentsFromFilings(supabase, null);
+}
+
+async function extractInvestmentsFromSingleFiling(supabase, filing) {
+  const investments = [];
+  
+  try {
+    console.log(`Fetching filing document from: ${filing.document_url}`);
+    
+    // Fetch the SEC filing document
+    const response = await fetch(filing.document_url, {
+      headers: {
+        'User-Agent': 'BDC-Investment-Tracker/1.0 (research@partnersgroup.com)',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: Failed to fetch document`);
+    }
+    
+    const documentText = await response.text();
+    console.log(`Downloaded document (${Math.round(documentText.length / 1024)}KB)`);
+    
+    // Use your existing parseScheduleOfInvestments function
+    const parsedInvestments = await parseScheduleOfInvestments(documentText);
+    
+    // Convert to the format expected by investments_raw table
+    for (const investment of parsedInvestments) {
+      const investmentRecord = {
+        filing_id: filing.id,
+        cik: filing.cik,
+        ticker: filing.ticker,
+        filing_date: filing.filing_date,
+        period_end_date: filing.period_end_date,
+        accession_number: filing.accession_number,
+        company_name: investment.company_name || '',
+        business_description: investment.business_description || '',
+        investment_tranche: investment.investment_tranche || '',
+        industry: '', // You can enhance this later
+        principal_amount: investment.principal_amount,
+        cost_basis: investment.amortized_cost,
+        fair_value: investment.fair_value,
+        shares_units: null, // You can enhance this later
+        percentage_of_net_assets: null, // You can enhance this later
+        coupon_rate: investment.coupon,
+        maturity_date: investment.acquisition_date,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+      
+      investments.push(investmentRecord);
+    }
+    
+    // Insert investments into the database in batches
+    if (investments.length > 0) {
+      const batchSize = 100;
+      for (let i = 0; i < investments.length; i += batchSize) {
+        const batch = investments.slice(i, i + batchSize);
+        const { error } = await supabase
+          .from('investments_raw')
+          .insert(batch);
+
+        if (error) {
+          console.error(`Error inserting batch for ${filing.ticker}:`, error);
+          throw new Error(`Database insert error: ${error.message}`);
+        }
+      }
+    }
+    
+    return investments;
+    
+  } catch (error) {
+    console.error(`Error extracting investments from ${filing.ticker}:`, error);
+    throw error;
+  }
+} response.json();
     const filings = [];
 
     if (data.filings && data.filings.recent) {
@@ -929,148 +1261,4 @@ async function fetchRecentSECFilings(cik, filingType, cutoffDate) {
       throw new Error(`SEC API error: ${response.status} ${response.statusText}`);
     }
 
-    const data = await response.json();
-    const filings = [];
-
-    if (data.filings && data.filings.recent) {
-      const recent = data.filings.recent;
-
-      for (let i = 0; i < recent.form.length; i++) {
-        const formType = recent.form[i];
-        const filingDate = recent.filingDate[i];
-
-        // Only process matching filing type after cutoff date
-        if (formType === filingType && new Date(filingDate) > cutoffDate) {
-          // FIXED: Add null safety for accession number processing
-          const accessionNumber = recent.accessionNumber[i];
-          const primaryDocument = recent.primaryDocument[i];
-
-          if (accessionNumber && primaryDocument) {
-            filings.push({
-              cik: cik,
-              accessionNumber: accessionNumber,
-              filingDate: filingDate,
-              formType: formType,
-              periodOfReport: recent.reportDate[i],
-              documentUrl: `https://www.sec.gov/Archives/edgar/data/${cik}/${safeExtractAccession(accessionNumber)}/${primaryDocument}`
-            });
-          }
-        }
-      }
-    }
-
-    // Sort by filing date (newest first for incremental)
-    filings.sort((a, b) => new Date(b.filingDate).getTime() - new Date(a.filingDate).getTime());
-
-    console.log(`Found ${filings.length} recent ${filingType} filings for CIK ${cik}`);
-    return filings;
-
-  } catch (error) {
-    console.error(`Error fetching recent SEC data for CIK ${cik}:`, error);
-    throw error;
-  }
-}
-
-async function setupScheduledJobs(supabase) {
-  console.log('Setting up scheduled jobs for all active BDCs');
-
-  try {
-    // FIXED: Get all active BDCs with NEW fiscal year-end columns
-    const { data: bdcs, error } = await supabase
-      .from('bdc_universe')
-      .select('ticker, company_name, fiscal_year_end_month, fiscal_year_end_day')
-      .eq('is_active', true);
-
-    if (error) {
-      throw new Error(`Failed to fetch BDCs: ${error.message}`);
-    }
-
-    let jobsCreated = 0;
-
-    for (const bdc of bdcs) {
-      // FIXED: Check for NEW fiscal year-end columns
-      if (!bdc.fiscal_year_end_month || !bdc.fiscal_year_end_day) {
-        console.warn(`Skipping ${bdc.ticker} - no fiscal year-end date`);
-        continue;
-      }
-
-      // FIXED: Calculate filing due dates using the NEW database function
-      const { data: filingDates } = await supabase
-        .rpc('calculate_next_filing_dates', {
-          fye_month: bdc.fiscal_year_end_month,
-          fye_day: bdc.fiscal_year_end_day
-        });
-
-      // Create scheduled jobs for each filing type
-      for (const filingDate of filingDates) {
-        const { error: jobError } = await supabase
-          .from('scheduled_jobs')
-          .upsert({
-            ticker: bdc.ticker,
-            job_type: filingDate.filing_type,
-            scheduled_date: filingDate.quarter_end,
-            next_run_at: filingDate.due_date
-          }, {
-            onConflict: 'ticker,job_type,scheduled_date'
-          });
-
-        if (jobError) {
-          console.error(`Failed to create job for ${bdc.ticker} ${filingDate.filing_type}:`, jobError);
-        } else {
-          jobsCreated++;
-          console.log(`Created scheduled job: ${bdc.ticker} ${filingDate.filing_type} due ${filingDate.due_date}`);
-        }
-      }
-    }
-
-    // Log completion
-    await supabase.from('processing_logs').insert({
-      log_level: 'info',
-      message: 'Scheduled jobs setup completed',
-      details: {
-        jobs_created: jobsCreated,
-        bdcs_processed: bdcs.length
-      }
-    });
-
-    return new Response(JSON.stringify({
-      message: 'Scheduled jobs setup completed',
-      jobs_created: jobsCreated,
-      bdcs_processed: bdcs.length
-    }), {
-      headers: {
-        ...corsHeaders,
-        'Content-Type': 'application/json'
-      }
-    });
-
-  } catch (error) {
-    console.error('Error setting up scheduled jobs:', error);
-
-    // Log error
-    await supabase.from('processing_logs').insert({
-      log_level: 'error',
-      message: 'Failed to setup scheduled jobs',
-      details: {
-        error: error.message
-      }
-    });
-
-    throw error;
-  }
-}
-
-function getQuarterYear(filingDate, filingType) {
-  const date = new Date(filingDate);
-  const year = date.getFullYear();
-
-  if (filingType === '10-K') {
-    return `Q4-${year}`;
-  } else {
-    const month = date.getMonth() + 1;
-    if (month <= 3) return `Q1-${year}`;
-    if (month <= 6) return `Q2-${year}`;
-    if (month <= 9) return `Q3-${year}`;
-    return `Q4-${year}`;
-  }
-}
+    const data = await
