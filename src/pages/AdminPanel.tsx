@@ -18,8 +18,8 @@ const AdminPanel = () => {
     try {
       console.log('Making API call with payload:', payload);
       
-      // Try the correct Supabase edge function URL format
-      const apiUrl = `${window.location.origin}/functions/v1/sec-extractor`;
+      // Use direct Supabase URL since frontend routing is causing 405
+      const apiUrl = 'https://pkpvyqvcsmyxcudamerw.supabase.co/functions/v1/sec-extractor';
       console.log('API URL:', apiUrl);
       
       const response = await fetch(apiUrl, {
@@ -376,16 +376,10 @@ const AdminPanel = () => {
             <button 
               onClick={async () => {
                 try {
-                  updateStatus('🔄 Testing API connection...', 'info');
+                  updateStatus('🔄 Testing direct Supabase API connection...', 'info');
                   
-                  // Try direct Supabase URL if relative URL fails
-                  let apiUrl = `${window.location.origin}/functions/v1/sec-extractor`;
-                  
-                  // If we're on Vercel, try the Supabase URL directly
-                  if (window.location.hostname.includes('vercel.app')) {
-                    const supabaseUrl = 'https://pkpvyqvcsmyxcudamerw.supabase.co';
-                    apiUrl = `${supabaseUrl}/functions/v1/sec-extractor`;
-                  }
+                  // Use direct Supabase URL
+                  const apiUrl = 'https://pkpvyqvcsmyxcudamerw.supabase.co/functions/v1/sec-extractor';
                   
                   console.log('Testing with URL:', apiUrl);
                   
@@ -403,7 +397,8 @@ const AdminPanel = () => {
                   console.log('Response text:', responseText);
                   
                   if (response.ok) {
-                    updateStatus('✅ API test successful!', 'success');
+                    const result = JSON.parse(responseText);
+                    updateStatus(`✅ API test successful! Response: ${JSON.stringify(result)}`, 'success');
                   } else {
                     updateStatus(`❌ API returned ${response.status}: ${responseText}`, 'error');
                   }
@@ -415,7 +410,7 @@ const AdminPanel = () => {
               disabled={loading}
               className="w-full bg-gray-500 text-white px-2 py-1 rounded text-xs hover:bg-gray-600 disabled:bg-gray-400"
             >
-              🔧 Test API Connection
+              🔧 Test Direct API
             </button>
           </div>
 
