@@ -6,7 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { TrendingDown, TrendingUp, DollarSign, AlertTriangle, Download, Search, Calendar } from "lucide-react";
+import { TrendingDown, TrendingUp, DollarSign, AlertTriangle, Download, Search, Calendar, Database } from "lucide-react";
 import { getInvestments, exportData } from "@/sdk";
 import type { Investment } from "@/sdk";
 
@@ -125,6 +125,11 @@ export default function BDCDashboard() {
     }
   };
 
+  const handlePullData = () => {
+    // Navigate to the admin panel
+    window.location.href = '/admin/bdc';
+  };
+
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
@@ -180,6 +185,10 @@ export default function BDCDashboard() {
           <p className="text-muted-foreground">Portfolio analytics and holdings overview</p>
         </div>
         <div className="flex items-center space-x-2">
+          <Button onClick={handlePullData} className="bg-blue-600 hover:bg-blue-700">
+            <Database className="w-4 h-4 mr-2" />
+            Pull Data
+          </Button>
           <Button onClick={handleExport} variant="outline" data-testid="export-button">
             <Download className="w-4 h-4 mr-2" />
             Export Data
