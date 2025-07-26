@@ -1,8 +1,8 @@
 import React from 'react';
-import * as Sentry from '@sentry/react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { captureException } from '@/lib/sentry';
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -39,18 +39,15 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
       errorInfo,
     });
 
-    // Send error to Sentry with additional context
-    Sentry.withScope((scope) => {
-      scope.setTag('errorBoundary', true);
-      scope.setLevel('error');
-      scope.setContext('errorInfo', {
+    // Log error with context
+    captureException(error, {
+      errorInfo: {
         componentStack: errorInfo.componentStack,
-      });
-      scope.setContext('errorBoundary', {
+      },
+      errorBoundary: {
         component: 'ErrorBoundary',
         timestamp: new Date().toISOString(),
-      });
-      Sentry.captureException(error);
+      }
     });
 
     console.error('ErrorBoundary caught an error:', error, errorInfo);
@@ -123,13 +120,12 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
 }
 
 /**
- * HOC that wraps components with Sentry Error Boundary
+ * HOC that wraps components with Error Boundary
  */
 export const withErrorBoundary = <P extends object>(
   Component: React.ComponentType<P>,
   options?: {
     fallback?: React.ComponentType<{ error: Error; resetError: () => void }>;
-    beforeCapture?: (scope: Sentry.Scope, error: Error, errorInfo: React.ErrorInfo) => void;
   }
 ) => {
   const WrappedComponent = (props: P) => (

@@ -1,5 +1,5 @@
 /**
- * Shared Sentry-like logging utility for Supabase Edge Functions
+ * Simple logging utility for Supabase Edge Functions
  * Provides structured logging with transaction and span tracking
  */
 
@@ -19,22 +19,13 @@ interface TransactionData extends SpanData {
   httpStatus?: number;
 }
 
-class LocalSentry {
-  private dsn: string | null;
+class LocalLogger {
   private context: LogContext = {};
   private tags: Record<string, string> = {};
   private currentTransaction: TransactionData | null = null;
 
-  constructor(dsn?: string) {
-    this.dsn = dsn || null;
-  }
-
-  init(config: { dsn: string; environment?: string; tracesSampleRate?: number; beforeSend?: (event: any) => any }) {
-    this.dsn = config.dsn;
-    this.log('info', 'Sentry initialized', { 
-      environment: config.environment,
-      dsn: config.dsn ? 'configured' : 'missing'
-    });
+  init() {
+    this.log('info', 'Logging initialized');
   }
 
   setContext(key: string, context: LogContext) {
@@ -145,14 +136,7 @@ class LocalSentry {
 }
 
 // Export singleton instance
-export const Sentry = new LocalSentry();
+export const Sentry = new LocalLogger();
 
-// Initialize if DSN is available
-const sentryDsn = Deno.env.get('SENTRY_DSN_EDGE');
-if (sentryDsn && !sentryDsn.includes('your-sentry-dsn')) {
-  Sentry.init({
-    dsn: sentryDsn,
-    environment: Deno.env.get('ENVIRONMENT') || 'production',
-    tracesSampleRate: 1.0,
-  });
-}
+// Initialize logging
+Sentry.init();

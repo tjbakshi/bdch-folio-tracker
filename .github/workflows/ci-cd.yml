@@ -98,16 +98,8 @@ jobs:
       env:
         VITE_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
         VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-        VITE_SENTRY_DSN: ${{ secrets.VITE_SENTRY_DSN }}
+        
 
-    - name: Upload sourcemaps to Sentry
-      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-      run: |
-        echo "Uploading sourcemaps to Sentry..."
-        npx @sentry/cli sourcemaps upload --release="$(git rev-parse HEAD)" --project="bdc-analytics" ./dist
-      env:
-        SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-        SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
 
     - name: Setup Supabase CLI
       uses: supabase/setup-cli@v1
@@ -138,7 +130,7 @@ jobs:
       env:
         SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
         SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-        SENTRY_DSN_EDGE: ${{ secrets.SENTRY_DSN_EDGE }}
+        
 
     - name: Upload smoke test results
       if: always()

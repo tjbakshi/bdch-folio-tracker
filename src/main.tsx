@@ -4,7 +4,7 @@ import { initSentry } from './lib/sentry'
 import ErrorBoundary from './components/ErrorBoundary'
 import './index.css'
 
-// Initialize Sentry before React renders
+// Initialize logging
 initSentry()
 
 createRoot(document.getElementById("root")!).render(
