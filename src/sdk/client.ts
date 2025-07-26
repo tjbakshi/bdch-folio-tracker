@@ -1,4 +1,4 @@
-import * as Sentry from '@sentry/react';
+import { captureException, startSpan } from '@/lib/sentry';
 import { supabase } from '@/integrations/supabase/client';
 import type {
   InvestmentSearchParams,
@@ -77,7 +77,7 @@ export class BDCApiClient {
   }
 
   /**
-   * Make API request using Supabase edge function invoke with Sentry monitoring
+   * Make API request using Supabase edge function invoke with performance monitoring
    */
   private async makeRequest<T>(
     endpoint: string,
@@ -89,17 +89,15 @@ export class BDCApiClient {
   ): Promise<T> {
     const { method = 'GET', params, body } = options;
     
-    // Start Sentry performance span
-    return Sentry.startSpan({
-      name: `BDC API ${method} ${endpoint}`,
-      op: 'http.client',
-      attributes: {
-        'http.method': method,
-        'api.endpoint': endpoint,
-        'api.client': 'supabase-functions',
-      }
-    }, async (span) => {
-      try {
+    // Start performance tracking
+    const span = startSpan(`BDC API ${method} ${endpoint}`, 'http.client');
+    console.log(`API Request: ${method} ${endpoint}`, {
+      'http.method': method,
+      'api.endpoint': endpoint,
+      'api.client': 'supabase-functions',
+    });
+    
+    try {
         let functionName: string;
         let functionOptions: any = {};
 
@@ -121,7 +119,7 @@ export class BDCApiClient {
           functionOptions.body = body;
         }
 
-        span.setAttributes({
+        console.log('Function invoke details:', {
           'supabase.function': functionName,
           'api.params_count': params ? Object.keys(params).length : 0,
         });
@@ -131,28 +129,29 @@ export class BDCApiClient {
         if (error) {
           const apiError = new BDCApiError(error.message || 'API request failed', 500, error);
           
-          // Capture API errors in Sentry
-          Sentry.captureException(apiError, {
-            contexts: {
-              api: {
-                endpoint,
-                method,
-                functionName,
-                error: error.message,
-              }
+          // Log API errors
+          captureException(apiError, {
+            api: {
+              endpoint,
+              method,
+              functionName,
+              error: error.message,
             }
           });
           
-          span.setStatus({ code: 2, message: 'Error' });
+          console.error('API Error:', apiError.message);
+          span.finish();
           throw apiError;
         }
 
-        span.setStatus({ code: 1, message: 'OK' });
+        console.log('API Success:', endpoint);
+        span.finish();
         return data as T;
       } catch (error) {
-        span.setStatus({ code: 2, message: 'Error' });
+        console.error('Request failed:', error);
         
         if (error instanceof BDCApiError) {
+          span.finish();
           throw error;
         }
         
@@ -162,20 +161,18 @@ export class BDCApiClient {
           error
         );
         
-        // Capture unexpected errors
-        Sentry.captureException(apiError, {
-          contexts: {
-            api: {
-              endpoint,
-              method,
-              originalError: error instanceof Error ? error.message : String(error),
-            }
+        // Log unexpected errors
+        captureException(apiError, {
+          api: {
+            endpoint,
+            method,
+            originalError: error instanceof Error ? error.message : String(error),
           }
         });
         
+        span.finish();
         throw apiError;
       }
-    });
   }
 
   /**
