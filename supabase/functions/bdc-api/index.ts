@@ -19,7 +19,11 @@ serve(async (req) => {
 
   try {
     const url = new URL(req.url);
-    const path = url.pathname.replace('/functions/v1/bdc-api', '');
+    const pathname = url.pathname;
+    const path = pathname.replace('/functions/v1/bdc-api', '');
+
+    console.log('Full URL:', req.url);
+    console.log('Resolved Pathname:', pathname);
 
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
@@ -48,9 +52,9 @@ serve(async (req) => {
     }
 
     return response;
+
   } catch (error) {
     console.error('Error in bdc-api:', error);
-
     return new Response(JSON.stringify({ 
       error: error.message,
       timestamp: new Date().toISOString()
@@ -61,5 +65,4 @@ serve(async (req) => {
   }
 });
 
-// The rest of the functions: searchInvestments, getMarkHistory, listNonAccruals, exportToExcel,
-// convertToCSV, invalidateCache remain unchanged. You can copy-paste them directly as-is from your current code.
+// The rest of your searchInvestments, getMarkHistory, listNonAccruals, exportToExcel, convertToCSV, invalidateCache functions remain unchanged below
