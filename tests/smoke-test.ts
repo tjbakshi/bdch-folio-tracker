@@ -6,7 +6,8 @@
  * Tests:
  * 1. BDC API endpoints (/investments, /nonaccruals, /cache/invalidate)
  * 2. SEC Extractor actions (incremental_check)
- * 3. Verifies [SENTRY] logs are emitted
+ * 3. Error handling and edge cases
+ * 4. Verifies [SENTRY] logs are emitted
  * 
  * Usage: deno run --allow-net --allow-env smoke-test.ts
  */
@@ -17,6 +18,7 @@ interface TestResult {
   responseTime: number;
   hasResponse: boolean;
   error?: string;
+  testType?: 'normal' | 'error' | 'edge';
 }
 
 interface SentryLogEntry {
@@ -40,17 +42,28 @@ class SmokeTest {
     this.baseUrl = `${this.supabaseUrl}/functions/v1`;
   }
 
-  async testEndpoint(endpoint: string, method = 'GET', body?: any): Promise<TestResult> {
+  async testEndpoint(endpoint: string, method = 'GET', body?: any, options?: { 
+    skipAuth?: boolean;
+    testType?: 'normal' | 'error' | 'edge';
+    expectError?: boolean;
+  }): Promise<TestResult> {
     const startTime = Date.now();
-    console.log(`🧪 Testing ${method} ${endpoint}...`);
+    const testType = options?.testType || 'normal';
+    console.log(`🧪 Testing ${method} ${endpoint}... (${testType} test)`);
 
     try {
+      const headers: any = {
+        'Content-Type': 'application/json',
+      };
+      
+      // Allow skipping auth for auth testing
+      if (!options?.skipAuth) {
+        headers['Authorization'] = `Bearer ${this.supabaseKey}`;
+      }
+
       const response = await fetch(`${this.baseUrl}/${endpoint}`, {
         method,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.supabaseKey}`,
-        },
+        headers,
         body: body ? JSON.stringify(body) : undefined,
       });
 
@@ -62,9 +75,13 @@ class SmokeTest {
         status: response.status,
         responseTime,
         hasResponse,
+        testType,
       };
 
-      if (!hasResponse || response.status === 404) {
+      // Handle expected errors differently
+      if (options?.expectError && response.status >= 400) {
+        console.log(`✅ ${endpoint}: Got expected error ${response.status} (${responseTime}ms)`);
+      } else if (!hasResponse || response.status === 404) {
         const errorText = await response.text();
         result.error = errorText;
         console.log(`❌ ${endpoint}: ${response.status} ${response.statusText}`);
@@ -87,6 +104,7 @@ class SmokeTest {
         responseTime,
         hasResponse: false,
         error: error.message,
+        testType,
       };
 
       console.log(`❌ ${endpoint}: Connection failed - ${error.message}`);
@@ -116,6 +134,80 @@ class SmokeTest {
       manager: 'ARCC',
       limit: 10
     }));
+  }
+
+  async testErrorCases(): Promise<void> {
+    console.log('\n🚨 Testing Error Handling...\n');
+
+    // Test 1: Invalid endpoint (404 error)
+    console.log('📍 Test: Invalid endpoint handling');
+    this.results.push(await this.testEndpoint(
+      'bdc-api/invalid-endpoint-that-does-not-exist', 
+      'GET',
+      null,
+      { testType: 'error', expectError: true }
+    ));
+
+    // Test 2: Invalid data format
+    console.log('📍 Test: Invalid data format handling');
+    this.results.push(await this.testEndpoint(
+      'bdc-api/investments',
+      'POST',
+      { 
+        limit: 'not-a-number',  // This should cause an error
+        invalid_field: 'test',
+        negative_limit: -10
+      },
+      { testType: 'error' }
+    ));
+
+    // Test 3: Missing authentication
+    console.log('📍 Test: Missing authentication handling');
+    this.results.push(await this.testEndpoint(
+      'bdc-api/investments',
+      'GET',
+      null,
+      { skipAuth: true, testType: 'error', expectError: true }
+    ));
+
+    // Test 4: Empty body where body is required
+    console.log('📍 Test: Empty body handling');
+    this.results.push(await this.testEndpoint(
+      'bdc-api/export',
+      'POST',
+      {},  // Empty body
+      { testType: 'error' }
+    ));
+
+    // Test 5: Extremely large limit (edge case)
+    console.log('📍 Test: Edge case - extremely large limit');
+    this.results.push(await this.testEndpoint(
+      'bdc-api/investments?limit=999999',
+      'GET',
+      null,
+      { testType: 'edge' }
+    ));
+
+    // Test 6: Special characters in parameters
+    console.log('📍 Test: Special characters in query params');
+    this.results.push(await this.testEndpoint(
+      'bdc-api/investments?manager=test%20%26%20special%20chars!',
+      'GET',
+      null,
+      { testType: 'edge' }
+    ));
+
+    // Test 7: Invalid action for SEC extractor
+    console.log('📍 Test: Invalid SEC extractor action');
+    this.results.push(await this.testEndpoint(
+      'sec-extractor',
+      'POST',
+      {
+        action: 'invalid_action_name',
+        ticker: 'ARCC'
+      },
+      { testType: 'error', expectError: true }
+    ));
   }
 
   async testSecExtractor(): Promise<void> {
@@ -185,43 +277,95 @@ class SmokeTest {
 
     let passed = 0;
     let failed = 0;
+    let expectedErrors = 0;
 
-    this.results.forEach(result => {
-      const status = result.hasResponse ? '✅ PASS' : '❌ FAIL';
-      const timing = `${result.responseTime}ms`;
-      
-      console.log(`${status} ${result.endpoint.padEnd(30)} ${result.status} (${timing})`);
-      
-      if (result.hasResponse) {
-        passed++;
-      } else {
-        failed++;
-        if (result.error) {
-          console.log(`     Error: ${result.error}`);
+    // Group results by test type
+    const normalTests = this.results.filter(r => r.testType !== 'error' && r.testType !== 'edge');
+    const errorTests = this.results.filter(r => r.testType === 'error');
+    const edgeTests = this.results.filter(r => r.testType === 'edge');
+
+    // Normal tests
+    if (normalTests.length > 0) {
+      console.log('\n🟢 Normal Tests:');
+      normalTests.forEach(result => {
+        const status = result.hasResponse ? '✅ PASS' : '❌ FAIL';
+        const timing = `${result.responseTime}ms`;
+        console.log(`${status} ${result.endpoint.padEnd(30)} ${result.status} (${timing})`);
+        
+        if (result.hasResponse) {
+          passed++;
+        } else {
+          failed++;
+          if (result.error) {
+            console.log(`     Error: ${result.error}`);
+          }
         }
-      }
-    });
+      });
+    }
 
-    console.log('═'.repeat(60));
+    // Error handling tests
+    if (errorTests.length > 0) {
+      console.log('\n🟡 Error Handling Tests:');
+      errorTests.forEach(result => {
+        // For error tests, we expect 4xx/5xx responses
+        const isExpectedError = result.status >= 400;
+        const status = isExpectedError ? '✅ PASS' : '❌ FAIL';
+        const timing = `${result.responseTime}ms`;
+        
+        console.log(`${status} ${result.endpoint.padEnd(30)} ${result.status} (${timing})`);
+        
+        if (isExpectedError) {
+          passed++;
+          expectedErrors++;
+        } else {
+          failed++;
+          console.log(`     Expected error response but got: ${result.status}`);
+        }
+      });
+    }
+
+    // Edge case tests
+    if (edgeTests.length > 0) {
+      console.log('\n🟠 Edge Case Tests:');
+      edgeTests.forEach(result => {
+        const status = result.hasResponse ? '✅ PASS' : '❌ FAIL';
+        const timing = `${result.responseTime}ms`;
+        console.log(`${status} ${result.endpoint.padEnd(30)} ${result.status} (${timing})`);
+        
+        if (result.hasResponse) {
+          passed++;
+        } else {
+          failed++;
+        }
+      });
+    }
+
+    console.log('\n' + '═'.repeat(60));
     console.log(`Total: ${this.results.length} | Passed: ${passed} | Failed: ${failed}`);
+    console.log(`Expected errors handled correctly: ${expectedErrors}`);
 
     if (failed > 0) {
       console.log('\n❌ Some tests failed. Check the errors above.');
       Deno.exit(1);
     } else {
-      console.log('\n✅ All tests passed!');
+      console.log('\n✅ All tests passed! Your error handling is working correctly.');
     }
   }
 
   async run(): Promise<void> {
-    console.log('🚀 BDC Analytics Smoke Test');
+    console.log('🚀 BDC Analytics Smoke Test with Error Handling');
     console.log(`📡 Testing against: ${this.baseUrl}`);
     console.log('═'.repeat(60));
 
     try {
+      // Run normal tests
       await this.testBdcApi();
       await this.testSecExtractor();
       
+      // Run error handling tests
+      await this.testErrorCases();
+      
+      // Check monitoring
       const sentryLogs = await this.checkSentryLogs();
       
       if (sentryLogs.length === 0) {
