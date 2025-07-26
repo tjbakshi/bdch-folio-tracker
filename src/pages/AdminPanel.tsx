@@ -40,8 +40,9 @@ export default function BDCAdminPage() {
   const [selectedBDCs, setSelectedBDCs] = useState<string[]>([]);
   const [currentOperation, setCurrentOperation] = useState<string>('');
 
-  // Updated BDC list with CIKs for SEC API
+  // Updated BDC list with CIKs for SEC API - Expanded with Large/Mid-Cap BDCs
   const bdcList: BDC[] = [
+    // Original 10 BDCs
     { cik: '1476765', ticker: 'GBDC', name: 'Golub Capital BDC', marketCap: '$1.1B', sector: 'Middle Market' },
     { cik: '1287750', ticker: 'ARCC', name: 'Ares Capital Corp', marketCap: '$7.4B', sector: 'Diversified' },
     { cik: '1552198', ticker: 'WHF', name: 'Whitehorse Finance', marketCap: '$900M', sector: 'Middle Market' },
@@ -51,7 +52,19 @@ export default function BDCAdminPage() {
     { cik: '1113169', ticker: 'AINV', name: 'Apollo Investment Corp', marketCap: '$1.1B', sector: 'Diversified' },
     { cik: '1398560', ticker: 'FSIC', name: 'FS Investment Corporation', marketCap: '$3.3B', sector: 'Diversified' },
     { cik: '1689029', ticker: 'BXSL', name: 'Blackstone Secured Lending', marketCap: '$5.2B', sector: 'Secured' },
-    { cik: '1517342', ticker: 'TCPC', name: 'BlackRock TCP Capital', marketCap: '$825M', sector: 'Middle Market' }
+    { cik: '1517342', ticker: 'TCPC', name: 'BlackRock TCP Capital', marketCap: '$825M', sector: 'Middle Market' },
+    
+    // Additional Large/Mid-Cap BDCs
+    { cik: '1871683', ticker: 'OBDC', name: 'Blue Owl Capital Corporation', marketCap: '$4.2B', sector: 'Direct Lending' },
+    { cik: '1414932', ticker: 'OCSL', name: 'Oaktree Specialty Lending', marketCap: '$3.1B', sector: 'Specialty' },
+    { cik: '1572694', ticker: 'GSBD', name: 'Goldman Sachs BDC', marketCap: '$2.8B', sector: 'Middle Market' },
+    { cik: '1425890', ticker: 'MAIN', name: 'Main Street Capital', marketCap: '$2.4B', sector: 'Lower Middle Market' },
+    { cik: '1280784', ticker: 'HTGC', name: 'Hercules Capital', marketCap: '$2.1B', sector: 'Technology' },
+    { cik: '1579982', ticker: 'CGBD', name: 'TCG BDC', marketCap: '$1.8B', sector: 'Middle Market' },
+    { cik: '1566502', ticker: 'BBDC', name: 'Barings BDC', marketCap: '$1.2B', sector: 'Middle Market' },
+    { cik: '1505294', ticker: 'SLRC', name: 'SLR Investment Corp', marketCap: '$1.5B', sector: 'Middle Market' },
+    { cik: '1379785', ticker: 'CSWC', name: 'Capital Southwest Corporation', marketCap: '$800M', sector: 'Lower Middle Market' },
+    { cik: '1105472', ticker: 'GAIN', name: 'Gladstone Investment Corporation', marketCap: '$500M', sector: 'Lower Middle Market' }
   ];
 
   const callSECExtractor = async (action: string, data?: any) => {
