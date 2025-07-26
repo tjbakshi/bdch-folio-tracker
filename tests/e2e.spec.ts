@@ -1,5 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
-import { waitForInvestments, waitForToast } from './helpers/playwright';
+import { waitForInvestments, waitForToast, waitForApiResponse } from './helpers/playwright';
+import { setupTestEnvironment, navigateToPage, waitForApplicationReady, cleanupTestEnvironment } from './utils/test-setup';
+import { validateTestEnvironment, getTestTimeouts } from './utils/env-setup';
 
 /**
  * BDC Analytics E2E Test Suite

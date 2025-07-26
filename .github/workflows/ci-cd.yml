@@ -47,19 +47,45 @@ jobs:
       run: npx playwright install --with-deps
 
     - name: Run E2E tests
-      run: npm run test:e2e
+      run: |
+        echo "🎭 Starting Playwright E2E tests..."
+        TEST_START_TIME=$(date +%s000) npm run test:e2e
       env:
         PLAYWRIGHT_BASE_URL: http://localhost:5173
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        TEST_START_TIME: ${{ github.run_id }}
+        CI: true
 
     - name: Upload test results
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: playwright-report
+        name: playwright-report-${{ github.run_id }}
         path: |
           playwright-report/
           test-results/
+          test-results/debug-*.png
         retention-days: 30
+        
+    - name: Generate test summary
+      if: always()
+      run: |
+        echo "📊 Generating test summary..."
+        if [ -d "test-results" ]; then
+          echo "### Test Results Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- Test artifacts uploaded as: playwright-report-${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY
+          
+          # Count test files
+          TEST_COUNT=$(find test-results -name "*.xml" -o -name "*.json" | wc -l)
+          echo "- Test result files: $TEST_COUNT" >> $GITHUB_STEP_SUMMARY
+          
+          # Check for screenshots
+          SCREENSHOT_COUNT=$(find test-results -name "*.png" | wc -l)
+          if [ $SCREENSHOT_COUNT -gt 0 ]; then
+            echo "- Debug screenshots captured: $SCREENSHOT_COUNT" >> $GITHUB_STEP_SUMMARY
+          fi
+        fi
 
     - name: Build Vite application
       run: |
