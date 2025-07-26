@@ -290,8 +290,10 @@ async function fetchSECFilings(cik, yearsBack) {
         const formType = recent.form[i];
         const filingDate = recent.filingDate[i];
 
-        // Only process matching filing type after cutoff date
-        if (formType === filingType && new Date(filingDate) > cutoffDate) {
+        // Only process 10-K and 10-Q filings after our cutoff date
+        if ((formType === '10-K' || formType === '10-Q') &&
+          new Date(filingDate) >= fromDate) {
+
           // FIXED: Add null safety for accession number processing
           const accessionNumber = recent.accessionNumber[i];
           const primaryDocument = recent.primaryDocument[i];
@@ -427,8 +429,6 @@ function getQuarterYear(filingDate, filingType) {
 }
 
 // NEW INVESTMENT EXTRACTION FUNCTIONS
-// Add these functions at the very end of your index.ts file
-
 async function extractInvestmentsFromFilings(supabase, ticker) {
   console.log(`[SENTRY] Starting investment extraction for ${ticker || 'all tickers'}`);
   
@@ -597,32 +597,7 @@ async function extractInvestmentsFromSingleFiling(supabase, filing) {
     console.error(`Error extracting investments from ${filing.ticker}:`, error);
     throw error;
   }
-} response.json();
-    const filings = [];
-
-    if (data.filings && data.filings.recent) {
-      const recent = data.filings.recent;
-
-      for (let i = 0; i < recent.form.length; i++) {
-        const formType = recent.form[i];
-        const filingDate = recent.filingDate[i];
-
-        // Only process 10-K and 10-Q filings after our cutoff date
-        if ((formType === '10-K' || formType === '10-Q') &&
-          new Date(filingDate) >= fromDate) {
-
-          // FIXED: Add null safety for accession number processing
-          const accessionNumber = recent.accessionNumber[i];
-          const primaryDocument = recent.primaryDocument[i];
-
-          if (accessionNumber && primaryDocument) {
-            filings.push({
-              cik: cik,
-              accessionNumber: accessionNumber,
-              filingDate: filingDate,
-              formType: formType,
-              periodOfReport: recent.reportDate[i],
-              documentUrl: `https://www.sec.gov/Archives/edgar/data/${cik}/${safeExtractAccession(accessionNumber)}/${primaryDocument}`
+}/Archives/edgar/data/${cik}/${safeExtractAccession(accessionNumber)}/${primaryDocument}`
             });
           }
         }
@@ -758,13 +733,6 @@ async function downloadDocument(url) {
   return await response.text();
 }
 
-/**
- * Parse Schedule of Investments from SEC filing HTML document
- * Uses cheerio to robustly extract investment data from various table formats
- * 
- * @param document - Raw HTML content of SEC filing
- * @returns Array of parsed investment data
- */
 async function parseScheduleOfInvestments(document) {
   console.log('Parsing Schedule of Investments with enhanced HTML parsing');
 
@@ -816,10 +784,6 @@ async function parseScheduleOfInvestments(document) {
   }
 }
 
-/**
- * Find the Schedule of Investments table in the document
- * Looks for tables containing investment-related headers
- */
 function findScheduleTable($) {
   const schedulePatterns = [
     /consolidated\s+schedule\s+of\s+investments/i,
@@ -848,9 +812,6 @@ function findScheduleTable($) {
   return targetTable;
 }
 
-/**
- * Score a table based on how many investment-related headers it contains
- */
 function getTableHeaderScore($, table) {
   const expectedHeaders = [
     /company|security|investment|name/i,
@@ -874,9 +835,6 @@ function getTableHeaderScore($, table) {
   return score;
 }
 
-/**
- * Extract column mapping from the table header
- */
 function extractColumnMapping($, table) {
   const mapping = {};
 
@@ -922,9 +880,6 @@ function extractColumnMapping($, table) {
   return mapping;
 }
 
-/**
- * Extract investment data rows from the table
- */
 function extractInvestmentRows($, table, columnMapping) {
   const rows = [];
 
@@ -963,9 +918,6 @@ function extractInvestmentRows($, table, columnMapping) {
   return rows;
 }
 
-/**
- * Process a single investment row into structured data
- */
 function processInvestmentRow(cells, columnMapping) {
   try {
     const investment = {};
@@ -1026,9 +978,6 @@ function processInvestmentRow(cells, columnMapping) {
   }
 }
 
-/**
- * Clean and normalize text values
- */
 function cleanTextValue(value) {
   if (!value) return '';
 
@@ -1038,9 +987,6 @@ function cleanTextValue(value) {
     .trim();
 }
 
-/**
- * Parse numeric values from text (handles thousands separators, parentheses for negative)
- */
 function parseNumericValue(value) {
   if (!value || value.trim() === '' || value === '—' || value === '-') {
     return undefined;
@@ -1065,9 +1011,6 @@ function parseNumericValue(value) {
   return isNegative ? -num : num;
 }
 
-/**
- * Parse date values and convert to YYYY-MM-DD format
- */
 function parseDateValue(value) {
   if (!value || value.trim() === '') {
     return undefined;
@@ -1261,4 +1204,27 @@ async function fetchRecentSECFilings(cik, filingType, cutoffDate) {
       throw new Error(`SEC API error: ${response.status} ${response.statusText}`);
     }
 
-    const data = await
+    const data = await response.json();
+    const filings = [];
+
+    if (data.filings && data.filings.recent) {
+      const recent = data.filings.recent;
+
+      for (let i = 0; i < recent.form.length; i++) {
+        const formType = recent.form[i];
+        const filingDate = recent.filingDate[i];
+
+        // Only process matching filing type after cutoff date
+        if (formType === filingType && new Date(filingDate) > cutoffDate) {
+          // FIXED: Add null safety for accession number processing
+          const accessionNumber = recent.accessionNumber[i];
+          const primaryDocument = recent.primaryDocument[i];
+
+          if (accessionNumber && primaryDocument) {
+            filings.push({
+              cik: cik,
+              accessionNumber: accessionNumber,
+              filingDate: filingDate,
+              formType: formType,
+              periodOfReport: recent.reportDate[i],
+              documentUrl: `https://www.sec.gov
