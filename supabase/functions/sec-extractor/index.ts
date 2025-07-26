@@ -37,6 +37,38 @@ interface InvestmentData {
   fair_value?: number;
 }
 
+// Helper functions for safe data processing
+function safePadCIK(cik: string | null | undefined): string {
+  if (!cik) {
+    throw new Error('CIK is required but was null or undefined');
+  }
+  return cik.toString().padStart(10, '0');
+}
+
+function safeFormatDate(dateValue: any): string {
+  if (!dateValue) {
+    return new Date().toISOString().split('T')[0];
+  }
+  
+  try {
+    const date = new Date(dateValue);
+    if (isNaN(date.getTime())) {
+      throw new Error('Invalid date');
+    }
+    return date.toISOString().split('T')[0];
+  } catch (error) {
+    console.error('[SENTRY] Date formatting error:', error);
+    return new Date().toISOString().split('T')[0];
+  }
+}
+
+function safeExtractAccession(accessionNumber: string | null | undefined): string {
+  if (!accessionNumber) {
+    throw new Error('Accession number is required but was null or undefined');
+  }
+  return accessionNumber.replace(/-/g, '');
+}
+
 Deno.serve(async (req) => {
   return Sentry.withSentry(async () => {
     // Start Sentry transaction for the entire request
@@ -230,7 +262,8 @@ async function backfillTicker(supabase: any, ticker: string, yearsBack: number) 
 }
 
 async function fetchSECFilings(cik: string, yearsBack: number): Promise<SECFiling[]> {
-  const paddedCik = cik.padStart(10, '0');
+  // FIXED: Add null safety for CIK padding
+  const paddedCik = safePadCIK(cik);
   const fromDate = new Date();
   fromDate.setFullYear(fromDate.getFullYear() - yearsBack);
   
@@ -263,14 +296,20 @@ async function fetchSECFilings(cik: string, yearsBack: number): Promise<SECFilin
         if ((formType === '10-K' || formType === '10-Q') && 
             new Date(filingDate) >= fromDate) {
           
-          filings.push({
-            cik: cik,
-            accessionNumber: recent.accessionNumber[i],
-            filingDate: filingDate,
-            formType: formType,
-            periodOfReport: recent.reportDate[i],
-            documentUrl: `https://www.sec.gov/Archives/edgar/data/${cik}/${recent.accessionNumber[i].replace(/-/g, '')}/${recent.primaryDocument[i]}`
-          });
+          // FIXED: Add null safety for accession number processing
+          const accessionNumber = recent.accessionNumber[i];
+          const primaryDocument = recent.primaryDocument[i];
+          
+          if (accessionNumber && primaryDocument) {
+            filings.push({
+              cik: cik,
+              accessionNumber: accessionNumber,
+              filingDate: filingDate,
+              formType: formType,
+              periodOfReport: recent.reportDate[i],
+              documentUrl: `https://www.sec.gov/Archives/edgar/data/${cik}/${safeExtractAccession(accessionNumber)}/${primaryDocument}`
+            });
+          }
         }
       }
     }
@@ -878,7 +917,8 @@ async function incrementalFilingCheck(supabase: any, ticker: string, filingType:
 }
 
 async function fetchRecentSECFilings(cik: string, filingType: string, cutoffDate: Date): Promise<SECFiling[]> {
-  const paddedCik = cik.padStart(10, '0');
+  // FIXED: Add null safety for CIK padding
+  const paddedCik = safePadCIK(cik);
   const searchUrl = `https://data.sec.gov/submissions/CIK${paddedCik}.json`;
   
   console.log(`Fetching recent ${filingType} filings for CIK ${cik} since ${cutoffDate.toISOString()}`);
@@ -906,14 +946,20 @@ async function fetchRecentSECFilings(cik: string, filingType: string, cutoffDate
         
         // Only process matching filing type after cutoff date
         if (formType === filingType && new Date(filingDate) > cutoffDate) {
-          filings.push({
-            cik: cik,
-            accessionNumber: recent.accessionNumber[i],
-            filingDate: filingDate,
-            formType: formType,
-            periodOfReport: recent.reportDate[i],
-            documentUrl: `https://www.sec.gov/Archives/edgar/data/${cik}/${recent.accessionNumber[i].replace(/-/g, '')}/${recent.primaryDocument[i]}`
-          });
+          // FIXED: Add null safety for accession number processing
+          const accessionNumber = recent.accessionNumber[i];
+          const primaryDocument = recent.primaryDocument[i];
+          
+          if (accessionNumber && primaryDocument) {
+            filings.push({
+              cik: cik,
+              accessionNumber: accessionNumber,
+              filingDate: filingDate,
+              formType: formType,
+              periodOfReport: recent.reportDate[i],
+              documentUrl: `https://www.sec.gov/Archives/edgar/data/${cik}/${safeExtractAccession(accessionNumber)}/${primaryDocument}`
+            });
+          }
         }
       }
     }
