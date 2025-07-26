@@ -141,7 +141,7 @@ jobs:
       run: |
         if [ -f "test-results/smoke-test-output.log" ]; then
           echo "Checking smoke test results..."
-          if grep -q "All tests passed!" test-results/smoke-test-output.log; then
+          if grep -q "All critical tests passed!" test-results/smoke-test-output.log; then
             echo "✅ Smoke tests passed successfully"
           else
             echo "❌ Smoke tests failed - check the logs"
