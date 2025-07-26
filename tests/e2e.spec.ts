@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { waitForInvestments, waitForToast, waitForApiResponse } from './helpers/playwright';
 import { setupTestEnvironment, navigateToPage, waitForApplicationReady, cleanupTestEnvironment } from './utils/test-setup';
 import { validateTestEnvironment, getTestTimeouts } from './utils/env-setup';
+import { InvestmentDataFactory, TestScenarios } from './factories/investment-data';
 
 /**
  * BDC Analytics E2E Test Suite
@@ -11,25 +12,21 @@ import { validateTestEnvironment, getTestTimeouts } from './utils/env-setup';
 test.describe('BDC Analytics Application', () => {
   
   test.beforeEach(async ({ page }) => {
-    // stub out investments for every dashboard-based test
+    // Use factory for consistent test data
+    const testData = InvestmentDataFactory.createAPIResponse(
+      InvestmentDataFactory.createMultipleInvestments(1, {
+        company_name: 'Tech Corp',
+        manager: 'ARCC',
+        business_description: 'A tech business',
+        investment_tranche: 'First Lien'
+      })
+    );
+    
     await page.route('**/bdc-api/investments**', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({
-          data: [{
-            id: 'stub-1',
-            company_name: 'Tech Corp',
-            manager: 'ARCC',
-            business_description: 'A tech business',
-            investment_tranche: 'First Lien',
-            principal_amount: 123_456,
-            fair_value: 120_000,
-            filings: { ticker: 'TECH', filing_date: '2024-02-02', filing_type: '10-K' },
-            investments_computed: [{ mark: 0.97, is_non_accrual: false, quarter_year: 'Q1 2024' }]
-          }],
-          pagination: { page: 1, limit: 100, total: 1, totalPages: 1 }
-        })
+        body: JSON.stringify(testData)
       });
     });
 
@@ -324,25 +321,16 @@ test.describe('BDC Analytics Application', () => {
 // Group responsive tests in a dedicated describe block
 test.describe('Responsive Design', () => {
   test.beforeEach(async ({ page }) => {
-    // Same route stubs as main suite
+    // Use factory for responsive test data
+    const testData = InvestmentDataFactory.createAPIResponse(
+      TestScenarios.normalInvestments()
+    );
+    
     await page.route('**/bdc-api/investments**', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({
-          data: [{
-            id: 'stub-1',
-            company_name: 'Tech Corp',
-            manager: 'ARCC',
-            business_description: 'A tech business',
-            investment_tranche: 'First Lien',
-            principal_amount: 123_456,
-            fair_value: 120_000,
-            filings: { ticker: 'TECH', filing_date: '2024-02-02', filing_type: '10-K' },
-            investments_computed: [{ mark: 0.97, is_non_accrual: false, quarter_year: 'Q1 2024' }]
-          }],
-          pagination: { page: 1, limit: 100, total: 1, totalPages: 1 }
-        })
+        body: JSON.stringify(testData)
       });
     });
     page.setDefaultTimeout(30000);
