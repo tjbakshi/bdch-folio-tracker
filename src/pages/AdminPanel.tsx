@@ -18,15 +18,20 @@ const AdminPanel = () => {
     try {
       console.log('Making API call with payload:', payload);
       
-      // Use direct Supabase URL since frontend routing is causing 405
+      // Use direct Supabase URL with proper auth headers
       const apiUrl = 'https://pkpvyqvcsmyxcudamerw.supabase.co/functions/v1/sec-extractor';
       console.log('API URL:', apiUrl);
+      
+      // Get the anon key from your project settings
+      const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBrcHZ5cXZjc215eGN1ZGFtZXJ3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU4NzQ2NzQsImV4cCI6MjA2MTQ1MDY3NH0.HlvI2MkKyZLpZCZOqWd4z6zXzgSe4u4XW_HQjK8w-qo';
       
       const response = await fetch(apiUrl, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
-          'Accept': 'application/json'
+          'Accept': 'application/json',
+          'Authorization': `Bearer ${supabaseAnonKey}`,
+          'apikey': supabaseAnonKey
         },
         body: JSON.stringify(payload)
       });
@@ -376,10 +381,11 @@ const AdminPanel = () => {
             <button 
               onClick={async () => {
                 try {
-                  updateStatus('🔄 Testing direct Supabase API connection...', 'info');
+                  updateStatus('🔄 Testing API with authorization...', 'info');
                   
-                  // Use direct Supabase URL
+                  // Use direct Supabase URL with auth
                   const apiUrl = 'https://pkpvyqvcsmyxcudamerw.supabase.co/functions/v1/sec-extractor';
+                  const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBrcHZ5cXZjc215eGN1ZGFtZXJ3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU4NzQ2NzQsImV4cCI6MjA2MTQ1MDY3NH0.HlvI2MkKyZLpZCZOqWd4z6zXzgSe4u4XW_HQjK8w-qo';
                   
                   console.log('Testing with URL:', apiUrl);
                   
@@ -387,7 +393,9 @@ const AdminPanel = () => {
                     method: 'POST',
                     headers: { 
                       'Content-Type': 'application/json',
-                      'Accept': 'application/json'
+                      'Accept': 'application/json',
+                      'Authorization': `Bearer ${supabaseAnonKey}`,
+                      'apikey': supabaseAnonKey
                     },
                     body: JSON.stringify({ action: 'backfill_ticker', ticker: 'ARCC', years_back: 1 })
                   });
@@ -410,7 +418,7 @@ const AdminPanel = () => {
               disabled={loading}
               className="w-full bg-gray-500 text-white px-2 py-1 rounded text-xs hover:bg-gray-600 disabled:bg-gray-400"
             >
-              🔧 Test Direct API
+              🔧 Test API with Auth
             </button>
           </div>
 
