@@ -70,7 +70,7 @@ interface Investment {
 class SECAPIExtractor {
   private readonly baseURL = 'https://data.sec.gov/api';
   private readonly headers = {
-    'User-Agent': 'BDC-Portfolio-Tracker github.com/tjbakshi/bdch-folio-tracker contact@yourcompany.com', // UPDATE WITH YOUR EMAIL
+    'User-Agent': 'BDC-Portfolio-Tracker github.com/tjbakshi/bdch-folio-tracker tj.bakshi@gmail.com',
     'Accept': 'application/json',
     'Accept-Encoding': 'gzip, deflate'
   };
