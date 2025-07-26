@@ -20,6 +20,8 @@ export type Database = {
           company_name: string
           created_at: string
           fiscal_year_end: string | null
+          fiscal_year_end_day: number | null
+          fiscal_year_end_month: number | null
           id: string
           is_active: boolean
           ticker: string
@@ -30,6 +32,8 @@ export type Database = {
           company_name: string
           created_at?: string
           fiscal_year_end?: string | null
+          fiscal_year_end_day?: number | null
+          fiscal_year_end_month?: number | null
           id?: string
           is_active?: boolean
           ticker: string
@@ -40,6 +44,8 @@ export type Database = {
           company_name?: string
           created_at?: string
           fiscal_year_end?: string | null
+          fiscal_year_end_day?: number | null
+          fiscal_year_end_month?: number | null
           id?: string
           is_active?: boolean
           ticker?: string
@@ -276,7 +282,7 @@ export type Database = {
     }
     Functions: {
       calculate_next_filing_dates: {
-        Args: { fye_date: string }
+        Args: { fye_date: string } | { fye_month: number; fye_day: number }
         Returns: {
           filing_type: string
           quarter_end: string
