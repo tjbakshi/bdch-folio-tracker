@@ -1,55 +1,25 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import * as cheerio from 'https://esm.sh/cheerio@1.0.0-rc.12';
 import { Sentry } from '../shared/sentry.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
-
-interface BDCTicker {
-  ticker: string;
-  company_name: string;
-  cik?: string;
-}
-
-interface SECFiling {
-  cik: string;
-  accessionNumber: string;
-  filingDate: string;
-  formType: string;
-  periodOfReport?: string;
-  documentUrl?: string;
-}
-
-interface InvestmentData {
-  company_name?: string;
-  business_description?: string;
-  investment_tranche?: string;
-  coupon?: string;
-  reference_rate?: string;
-  spread?: string;
-  acquisition_date?: string;
-  principal_amount?: number;
-  amortized_cost?: number;
-  fair_value?: number;
-}
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
+};
 
 // Helper functions for safe data processing
-function safePadCIK(cik: string | null | undefined): string {
+function safePadCIK(cik) {
   if (!cik) {
     throw new Error('CIK is required but was null or undefined');
   }
   return cik.toString().padStart(10, '0');
 }
 
-function safeFormatDate(dateValue: any): string {
+function safeFormatDate(dateValue) {
   if (!dateValue) {
     return new Date().toISOString().split('T')[0];
   }
-  
   try {
     const date = new Date(dateValue);
     if (isNaN(date.getTime())) {
@@ -62,7 +32,7 @@ function safeFormatDate(dateValue: any): string {
   }
 }
 
-function safeExtractAccession(accessionNumber: string | null | undefined): string {
+function safeExtractAccession(accessionNumber) {
   if (!accessionNumber) {
     throw new Error('Accession number is required but was null or undefined');
   }
@@ -77,7 +47,7 @@ Deno.serve(async (req) => {
       op: 'http.server',
       tags: {
         'http.method': req.method,
-        'function.name': 'sec-extractor',
+        'function.name': 'sec-extractor'
       }
     });
 
@@ -85,7 +55,9 @@ Deno.serve(async (req) => {
 
     // Handle CORS preflight requests
     if (req.method === 'OPTIONS') {
-      return new Response(null, { headers: corsHeaders });
+      return new Response(null, {
+        headers: corsHeaders
+      });
     }
 
     try {
@@ -93,60 +65,66 @@ Deno.serve(async (req) => {
       Sentry.setContext('request', {
         url: req.url,
         method: req.method,
-        userAgent: req.headers.get('user-agent'),
+        userAgent: req.headers.get('user-agent')
       });
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    );
+
+      const supabase = createClient(
+        Deno.env.get('SUPABASE_URL') ?? '',
+        Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+      );
 
       const { action, ticker, yearsBack, years_back, filing_id, filing_type } = await req.json();
 
       console.log(`Processing action: ${action} for ticker: ${ticker || 'all'}`);
-      
+
       // Add action context to Sentry
-      Sentry.setContext('action', { action, ticker, filing_id, filing_type });
+      Sentry.setContext('action', {
+        action,
+        ticker,
+        filing_id,
+        filing_type
+      });
       Sentry.setTag('action', action);
       if (ticker) Sentry.setTag('ticker', ticker);
 
-      let response: Response;
+      let response;
 
       switch (action) {
         case 'backfill_all':
-          response = await Sentry.startSpan(
-            { name: 'backfillAllBDCs', op: 'sec.backfill' },
-            async () => await backfillAllBDCs(supabase)
-          );
+          response = await Sentry.startSpan({
+            name: 'backfillAllBDCs',
+            op: 'sec.backfill'
+          }, async () => await backfillAllBDCs(supabase));
           break;
-        
+
         case 'backfill_ticker':
-          response = await Sentry.startSpan(
-            { name: 'backfillTicker', op: 'sec.backfill' },
-            async () => await backfillTicker(supabase, ticker, yearsBack || years_back || 3)
-          );
+          response = await Sentry.startSpan({
+            name: 'backfillTicker',
+            op: 'sec.backfill'
+          }, async () => await backfillTicker(supabase, ticker, yearsBack || years_back || 3));
           break;
-        
+
         case 'extract_filing':
-          response = await Sentry.startSpan(
-            { name: 'extractFiling', op: 'sec.extract' },
-            async () => await extractFiling(supabase, filing_id)
-          );
+          response = await Sentry.startSpan({
+            name: 'extractFiling',
+            op: 'sec.extract'
+          }, async () => await extractFiling(supabase, filing_id));
           break;
-        
+
         case 'incremental_check':
-          response = await Sentry.startSpan(
-            { name: 'incrementalFilingCheck', op: 'sec.check' },
-            async () => await incrementalFilingCheck(supabase, ticker, filing_type)
-          );
+          response = await Sentry.startSpan({
+            name: 'incrementalFilingCheck',
+            op: 'sec.check'
+          }, async () => await incrementalFilingCheck(supabase, ticker, filing_type));
           break;
-        
+
         case 'setup_scheduled_jobs':
-          response = await Sentry.startSpan(
-            { name: 'setupScheduledJobs', op: 'sec.setup' },
-            async () => await setupScheduledJobs(supabase)
-          );
+          response = await Sentry.startSpan({
+            name: 'setupScheduledJobs',
+            op: 'sec.setup'
+          }, async () => await setupScheduledJobs(supabase));
           break;
-        
+
         default:
           throw new Error(`Unknown action: ${action}`);
       }
@@ -157,38 +135,38 @@ Deno.serve(async (req) => {
 
     } catch (error) {
       console.error('Error in SEC extractor:', error);
-      
+
       // Capture error in Sentry with context
       Sentry.captureException(error, {
         contexts: {
           request: {
             url: req.url,
-            method: req.method,
+            method: req.method
           }
         }
       });
 
       transaction.setStatus('internal_error');
-      
-      return new Response(
-        JSON.stringify({ 
-          error: error.message,
-          timestamp: new Date().toISOString()
-        }),
-        {
-          status: 500,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+
+      return new Response(JSON.stringify({
+        error: error.message,
+        timestamp: new Date().toISOString()
+      }), {
+        status: 500,
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json'
         }
-      );
+      });
     } finally {
       transaction.finish();
     }
   });
 });
 
-async function backfillAllBDCs(supabase: any) {
+async function backfillAllBDCs(supabase) {
   console.log('Starting backfill for all BDCs');
-  
+
   // Get all active BDC tickers
   const { data: bdcs, error } = await supabase
     .from('bdc_universe')
@@ -210,27 +188,32 @@ async function backfillAllBDCs(supabase: any) {
     } catch (error) {
       console.error(`Failed to process ${bdc.ticker}:`, error);
       errorCount++;
-      
+
       // Log the error
       await supabase.from('processing_logs').insert({
         log_level: 'error',
         message: `Failed to backfill ticker ${bdc.ticker}`,
-        details: { error: error.message, ticker: bdc.ticker }
+        details: {
+          error: error.message,
+          ticker: bdc.ticker
+        }
       });
     }
   }
 
-  return new Response(
-    JSON.stringify({ 
-      message: 'Backfill completed',
-      processed: processedCount,
-      errors: errorCount
-    }),
-    { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-  );
+  return new Response(JSON.stringify({
+    message: 'Backfill completed',
+    processed: processedCount,
+    errors: errorCount
+  }), {
+    headers: {
+      ...corsHeaders,
+      'Content-Type': 'application/json'
+    }
+  });
 }
 
-async function backfillTicker(supabase: any, ticker: string, yearsBack: number) {
+async function backfillTicker(supabase, ticker, yearsBack) {
   console.log(`Backfilling ticker: ${ticker} for ${yearsBack} years`);
 
   // Get BDC info
@@ -251,7 +234,7 @@ async function backfillTicker(supabase: any, ticker: string, yearsBack: number) 
 
   // Fetch filings from SEC API
   const filings = await fetchSECFilings(cik, yearsBack);
-  
+
   // Store filings in database
   for (const filing of filings) {
     await storeFiling(supabase, ticker, filing);
@@ -261,14 +244,14 @@ async function backfillTicker(supabase: any, ticker: string, yearsBack: number) 
   return filings.length;
 }
 
-async function fetchSECFilings(cik: string, yearsBack: number): Promise<SECFiling[]> {
+async function fetchSECFilings(cik, yearsBack) {
   // FIXED: Add null safety for CIK padding
   const paddedCik = safePadCIK(cik);
   const fromDate = new Date();
   fromDate.setFullYear(fromDate.getFullYear() - yearsBack);
-  
+
   const searchUrl = `https://data.sec.gov/submissions/CIK${paddedCik}.json`;
-  
+
   console.log(`Fetching SEC data from: ${searchUrl}`);
 
   try {
@@ -283,23 +266,23 @@ async function fetchSECFilings(cik: string, yearsBack: number): Promise<SECFilin
     }
 
     const data = await response.json();
-    const filings: SECFiling[] = [];
+    const filings = [];
 
     if (data.filings && data.filings.recent) {
       const recent = data.filings.recent;
-      
+
       for (let i = 0; i < recent.form.length; i++) {
         const formType = recent.form[i];
         const filingDate = recent.filingDate[i];
-        
+
         // Only process 10-K and 10-Q filings after our cutoff date
-        if ((formType === '10-K' || formType === '10-Q') && 
-            new Date(filingDate) >= fromDate) {
-          
+        if ((formType === '10-K' || formType === '10-Q') &&
+          new Date(filingDate) >= fromDate) {
+
           // FIXED: Add null safety for accession number processing
           const accessionNumber = recent.accessionNumber[i];
           const primaryDocument = recent.primaryDocument[i];
-          
+
           if (accessionNumber && primaryDocument) {
             filings.push({
               cik: cik,
@@ -316,7 +299,7 @@ async function fetchSECFilings(cik: string, yearsBack: number): Promise<SECFilin
 
     // Sort chronologically (oldest first)
     filings.sort((a, b) => new Date(a.filingDate).getTime() - new Date(b.filingDate).getTime());
-    
+
     console.log(`Found ${filings.length} relevant filings for CIK ${cik}`);
     return filings;
 
@@ -326,7 +309,7 @@ async function fetchSECFilings(cik: string, yearsBack: number): Promise<SECFilin
   }
 }
 
-async function storeFiling(supabase: any, ticker: string, filing: SECFiling) {
+async function storeFiling(supabase, ticker, filing) {
   try {
     const { data, error } = await supabase
       .from('filings')
@@ -359,7 +342,7 @@ async function storeFiling(supabase: any, ticker: string, filing: SECFiling) {
   }
 }
 
-async function extractFiling(supabase: any, filingId: string) {
+async function extractFiling(supabase, filingId) {
   console.log(`Extracting filing: ${filingId}`);
 
   // Get filing details
@@ -377,7 +360,9 @@ async function extractFiling(supabase: any, filingId: string) {
     // Update status to processing
     await supabase
       .from('filings')
-      .update({ status: 'processing' })
+      .update({
+        status: 'processing'
+      })
       .eq('id', filingId);
 
     // Download and parse the document
@@ -392,26 +377,30 @@ async function extractFiling(supabase: any, filingId: string) {
     // Update filing status to completed
     await supabase
       .from('filings')
-      .update({ status: 'completed' })
+      .update({
+        status: 'completed'
+      })
       .eq('id', filingId);
 
     console.log(`Successfully extracted ${investments.length} investments from filing ${filingId}`);
-    
-    return new Response(
-      JSON.stringify({ 
-        message: 'Filing extracted successfully',
-        investments_count: investments.length
-      }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
+
+    return new Response(JSON.stringify({
+      message: 'Filing extracted successfully',
+      investments_count: investments.length
+    }), {
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/json'
+      }
+    });
 
   } catch (error) {
     console.error(`Error extracting filing ${filingId}:`, error);
-    
+
     // Update filing status to failed
     await supabase
       .from('filings')
-      .update({ 
+      .update({
         status: 'failed',
         error_message: error.message
       })
@@ -421,9 +410,9 @@ async function extractFiling(supabase: any, filingId: string) {
   }
 }
 
-async function downloadDocument(url: string): Promise<string> {
+async function downloadDocument(url) {
   console.log(`Downloading document: ${url}`);
-  
+
   const response = await fetch(url, {
     headers: {
       'User-Agent': 'BDC-Tracker research@partnersgroup.com'
@@ -444,40 +433,40 @@ async function downloadDocument(url: string): Promise<string> {
  * @param document - Raw HTML content of SEC filing
  * @returns Array of parsed investment data
  */
-async function parseScheduleOfInvestments(document: string): Promise<InvestmentData[]> {
+async function parseScheduleOfInvestments(document) {
   console.log('Parsing Schedule of Investments with enhanced HTML parsing');
-  
-  const investments: InvestmentData[] = [];
-  
+
+  const investments = [];
+
   try {
     // Load HTML with cheerio
     const $ = cheerio.load(document);
-    
+
     // Find the Schedule of Investments table
     const scheduleTable = findScheduleTable($);
-    
+
     if (!scheduleTable) {
       console.warn('Schedule of Investments table not found in document');
       return investments;
     }
-    
+
     console.log('Found Schedule of Investments table');
-    
+
     // Extract column mapping from header row
     const columnMapping = extractColumnMapping($, scheduleTable);
-    
+
     if (Object.keys(columnMapping).length < 3) {
       console.warn('Insufficient column headers found, skipping table');
       return investments;
     }
-    
+
     console.log('Column mapping:', columnMapping);
-    
+
     // Extract investment rows
     const rows = extractInvestmentRows($, scheduleTable, columnMapping);
-    
+
     console.log(`Extracted ${rows.length} investment rows`);
-    
+
     // Process each row into structured data
     for (const row of rows) {
       const investment = processInvestmentRow(row, columnMapping);
@@ -485,10 +474,10 @@ async function parseScheduleOfInvestments(document: string): Promise<InvestmentD
         investments.push(investment);
       }
     }
-    
+
     console.log(`Parsed ${investments.length} valid investments`);
     return investments;
-    
+
   } catch (error) {
     console.error('Error parsing Schedule of Investments:', error);
     return investments;
@@ -499,19 +488,19 @@ async function parseScheduleOfInvestments(document: string): Promise<InvestmentD
  * Find the Schedule of Investments table in the document
  * Looks for tables containing investment-related headers
  */
-function findScheduleTable($: any): any {
+function findScheduleTable($) {
   const schedulePatterns = [
     /consolidated\s+schedule\s+of\s+investments/i,
     /schedule\s+of\s+investments/i,
     /investment\s+portfolio/i
   ];
-  
+
   // Search for table headers that match schedule patterns
   let targetTable = null;
-  
-  $('table').each((i: number, table: any) => {
+
+  $('table').each((i, table) => {
     const tableText = $(table).text();
-    
+
     for (const pattern of schedulePatterns) {
       if (pattern.test(tableText)) {
         // Verify this table has investment-related columns
@@ -523,14 +512,14 @@ function findScheduleTable($: any): any {
       }
     }
   });
-  
+
   return targetTable;
 }
 
 /**
  * Score a table based on how many investment-related headers it contains
  */
-function getTableHeaderScore($: any, table: any): number {
+function getTableHeaderScore($, table) {
   const expectedHeaders = [
     /company|security|investment|name/i,
     /principal|notional|cost|commitment/i,
@@ -540,34 +529,34 @@ function getTableHeaderScore($: any, table: any): number {
     /maturity|date/i,
     /industry|business|sector/i
   ];
-  
+
   const tableText = $(table).find('th, td').first().parent().parent().text().toLowerCase();
-  
+
   let score = 0;
   for (const pattern of expectedHeaders) {
     if (pattern.test(tableText)) {
       score++;
     }
   }
-  
+
   return score;
 }
 
 /**
  * Extract column mapping from the table header
  */
-function extractColumnMapping($: any, table: any): { [key: string]: number } {
-  const mapping: { [key: string]: number } = {};
-  
+function extractColumnMapping($, table) {
+  const mapping = {};
+
   // Find header row (usually first row with th elements or first row in general)
   let headerRow = $(table).find('thead tr').first();
   if (headerRow.length === 0) {
     headerRow = $(table).find('tr').first();
   }
-  
-  headerRow.find('th, td').each((index: number, cell: any) => {
+
+  headerRow.find('th, td').each((index, cell) => {
     const headerText = $(cell).text().trim().toLowerCase();
-    
+
     // Map common header variations to standardized field names
     if (/company|security|investment|name/i.test(headerText) && !mapping.company_name) {
       mapping.company_name = index;
@@ -597,97 +586,97 @@ function extractColumnMapping($: any, table: any): { [key: string]: number } {
       mapping.acquisition_date = index;
     }
   });
-  
+
   return mapping;
 }
 
 /**
  * Extract investment data rows from the table
  */
-function extractInvestmentRows($: any, table: any, columnMapping: { [key: string]: number }): string[][] {
-  const rows: string[][] = [];
-  
+function extractInvestmentRows($, table, columnMapping) {
+  const rows = [];
+
   // Skip header rows and extract data rows
-  $(table).find('tr').each((index: number, row: any) => {
+  $(table).find('tr').each((index, row) => {
     const $row = $(row);
-    
+
     // Skip header rows (contain th elements or are first few rows)
     if ($row.find('th').length > 0 || index === 0) {
       return; // Continue to next row
     }
-    
+
     // Skip total/summary rows
     const rowText = $row.text().toLowerCase();
     if (/total|subtotal|^$/.test(rowText.trim())) {
       return;
     }
-    
+
     // Extract cell values
-    const cells: string[] = [];
-    $row.find('td').each((cellIndex: number, cell: any) => {
+    const cells = [];
+    $row.find('td').each((cellIndex, cell) => {
       let cellText = $(cell).text().trim();
-      
+
       // Remove footnote markers (numbers in parentheses, asterisks, etc.)
       cellText = cellText.replace(/\(\d+\)|\*+|†+/g, '').trim();
-      
+
       cells[cellIndex] = cellText;
     });
-    
+
     // Only include rows with sufficient data
     if (cells.length >= Math.max(...Object.values(columnMapping)) + 1) {
       rows.push(cells);
     }
   });
-  
+
   return rows;
 }
 
 /**
  * Process a single investment row into structured data
  */
-function processInvestmentRow(cells: string[], columnMapping: { [key: string]: number }): InvestmentData | null {
+function processInvestmentRow(cells, columnMapping) {
   try {
-    const investment: InvestmentData = {};
-    
+    const investment = {};
+
     // Extract string fields
     if (columnMapping.company_name !== undefined) {
       investment.company_name = cleanTextValue(cells[columnMapping.company_name]);
     }
-    
+
     if (columnMapping.business_description !== undefined) {
       investment.business_description = cleanTextValue(cells[columnMapping.business_description]);
     }
-    
+
     if (columnMapping.investment_tranche !== undefined) {
       investment.investment_tranche = cleanTextValue(cells[columnMapping.investment_tranche]);
     }
-    
+
     if (columnMapping.coupon !== undefined) {
       investment.coupon = cleanTextValue(cells[columnMapping.coupon]);
     }
-    
+
     if (columnMapping.spread !== undefined) {
       investment.spread = cleanTextValue(cells[columnMapping.spread]);
     }
-    
+
     // Extract numeric fields
     if (columnMapping.principal_amount !== undefined) {
       investment.principal_amount = parseNumericValue(cells[columnMapping.principal_amount]);
     }
-    
+
     if (columnMapping.amortized_cost !== undefined) {
       investment.amortized_cost = parseNumericValue(cells[columnMapping.amortized_cost]);
     }
-    
+
     if (columnMapping.fair_value !== undefined) {
       investment.fair_value = parseNumericValue(cells[columnMapping.fair_value]);
     }
-    
+
     // Extract dates
     if (columnMapping.acquisition_date !== undefined) {
       investment.acquisition_date = parseDateValue(cells[columnMapping.acquisition_date]);
     }
-    
+
     // Parse reference rate from coupon if present
     if (investment.coupon) {
       const rateMatch = investment.coupon.match(/(LIBOR|SOFR|Prime|Base)\s*\+?\s*(\d+\.?\d*)/i);
@@ -696,9 +685,9 @@ function processInvestmentRow(cells: string[], columnMapping: { [key: string]: n
         investment.spread = rateMatch[2] + '%';
       }
     }
-    
+
     return investment;
-    
+
   } catch (error) {
     console.error('Error processing investment row:', error);
     return null;
@@ -708,9 +697,9 @@ function processInvestmentRow(cells: string[], columnMapping: { [key: string]: n
 /**
  * Clean and normalize text values
  */
-function cleanTextValue(value: string): string {
+function cleanTextValue(value) {
   if (!value) return '';
-  
+
   return value
     .replace(/\s+/g, ' ')  // Normalize whitespace
     .replace(/["']/g, '')  // Remove quotes
@@ -720,55 +709,55 @@ function cleanTextValue(value: string): string {
 /**
  * Parse numeric values from text (handles thousands separators, parentheses for negative)
  */
-function parseNumericValue(value: string): number | undefined {
+function parseNumericValue(value) {
   if (!value || value.trim() === '' || value === '—' || value === '-') {
     return undefined;
   }
-  
+
   // Remove dollar signs, commas, and whitespace
   let cleaned = value.replace(/[$,\s]/g, '');
-  
+
   // Handle negative values in parentheses
   const isNegative = /^\(.*\)$/.test(cleaned);
   if (isNegative) {
     cleaned = cleaned.replace(/[()]/g, '');
   }
-  
+
   // Convert to number
   const num = parseFloat(cleaned);
-  
+
   if (isNaN(num)) {
     return undefined;
   }
-  
+
   return isNegative ? -num : num;
 }
 
 /**
  * Parse date values and convert to YYYY-MM-DD format
  */
-function parseDateValue(value: string): string | undefined {
+function parseDateValue(value) {
   if (!value || value.trim() === '') {
     return undefined;
   }
-  
+
   try {
     // Handle various date formats
     const date = new Date(value.trim());
-    
+
     if (isNaN(date.getTime())) {
       return undefined;
     }
-    
+
     // Return in YYYY-MM-DD format
     return date.toISOString().split('T')[0];
-    
+
   } catch (error) {
     return undefined;
   }
 }
 
-async function storeInvestment(supabase: any, filingId: string, investment: InvestmentData) {
+async function storeInvestment(supabase, filingId, investment) {
   // Store raw investment data
   const { data: rawData, error: rawError } = await supabase
     .from('investments_raw')
@@ -794,12 +783,12 @@ async function storeInvestment(supabase: any, filingId: string, investment: Inve
   }
 
   // Compute derived fields
-  const mark = investment.principal_amount && investment.fair_value 
-    ? investment.fair_value / investment.principal_amount 
+  const mark = investment.principal_amount && investment.fair_value
+    ? investment.fair_value / investment.principal_amount
     : null;
-    
+
   const isNonAccrual = investment.business_description?.toLowerCase().includes('non-accrual') || false;
-  
+
   // Get quarter year from filing
   const { data: filing } = await supabase
     .from('filings')
@@ -821,14 +810,14 @@ async function storeInvestment(supabase: any, filingId: string, investment: Inve
     });
 }
 
-async function incrementalFilingCheck(supabase: any, ticker: string, filingType: string) {
+async function incrementalFilingCheck(supabase, ticker, filingType) {
   console.log(`Incremental check for ${ticker} - ${filingType}`);
-  
+
   try {
-    // Get BDC info
+    // FIXED: Use new fiscal year-end columns
     const { data: bdc, error: bdcError } = await supabase
       .from('bdc_universe')
-      .select('cik, company_name, fiscal_year_end')
+      .select('cik, company_name, fiscal_year_end_month, fiscal_year_end_day')
       .eq('ticker', ticker)
       .single();
 
@@ -847,13 +836,13 @@ async function incrementalFilingCheck(supabase: any, ticker: string, filingType:
       .single();
 
     // Calculate cutoff date (only check for filings newer than last one)
-    const cutoffDate = lastFiling 
+    const cutoffDate = lastFiling
       ? new Date(lastFiling.filing_date)
       : new Date(Date.now() - 365 * 24 * 60 * 60 * 1000); // Default to 1 year ago
 
     // Fetch recent filings from SEC
     const recentFilings = await fetchRecentSECFilings(bdc.cik, filingType, cutoffDate);
-    
+
     let newFilingsCount = 0;
     let extractedCount = 0;
 
@@ -870,11 +859,11 @@ async function incrementalFilingCheck(supabase: any, ticker: string, filingType:
         // Store new filing
         const storedFiling = await storeFiling(supabase, ticker, filing);
         newFilingsCount++;
-        
+
         // Extract investments immediately
         await extractFiling(supabase, storedFiling.id);
         extractedCount++;
-        
+
         console.log(`Processed new filing: ${filing.accessionNumber}`);
       }
     }
@@ -883,44 +872,50 @@ async function incrementalFilingCheck(supabase: any, ticker: string, filingType:
     await supabase.from('processing_logs').insert({
       log_level: 'info',
       message: `Incremental check completed for ${ticker}`,
-      details: { 
-        ticker, 
-        filing_type: filingType, 
+      details: {
+        ticker,
+        filing_type: filingType,
         new_filings: newFilingsCount,
         extracted: extractedCount
       }
     });
 
-    return new Response(
-      JSON.stringify({ 
-        message: 'Incremental check completed',
-        ticker,
-        filing_type: filingType,
-        new_filings: newFilingsCount,
-        extracted: extractedCount
-      }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
+    return new Response(JSON.stringify({
+      message: 'Incremental check completed',
+      ticker,
+      filing_type: filingType,
+      new_filings: newFilingsCount,
+      extracted: extractedCount
+    }), {
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/json'
+      }
+    });
 
   } catch (error) {
     console.error(`Error in incremental check for ${ticker}:`, error);
-    
+
     // Log error
     await supabase.from('processing_logs').insert({
       log_level: 'error',
       message: `Incremental check failed for ${ticker}`,
-      details: { ticker, filing_type: filingType, error: error.message }
+      details: {
+        ticker,
+        filing_type: filingType,
+        error: error.message
+      }
     });
 
     throw error;
   }
 }
 
-async function fetchRecentSECFilings(cik: string, filingType: string, cutoffDate: Date): Promise<SECFiling[]> {
+async function fetchRecentSECFilings(cik, filingType, cutoffDate) {
   // FIXED: Add null safety for CIK padding
   const paddedCik = safePadCIK(cik);
   const searchUrl = `https://data.sec.gov/submissions/CIK${paddedCik}.json`;
-  
+
   console.log(`Fetching recent ${filingType} filings for CIK ${cik} since ${cutoffDate.toISOString()}`);
 
   try {
@@ -935,21 +930,21 @@ async function fetchRecentSECFilings(cik: string, filingType: string, cutoffDate
     }
 
     const data = await response.json();
-    const filings: SECFiling[] = [];
+    const filings = [];
 
     if (data.filings && data.filings.recent) {
       const recent = data.filings.recent;
-      
+
       for (let i = 0; i < recent.form.length; i++) {
         const formType = recent.form[i];
         const filingDate = recent.filingDate[i];
-        
+
         // Only process matching filing type after cutoff date
         if (formType === filingType && new Date(filingDate) > cutoffDate) {
           // FIXED: Add null safety for accession number processing
           const accessionNumber = recent.accessionNumber[i];
           const primaryDocument = recent.primaryDocument[i];
-          
+
           if (accessionNumber && primaryDocument) {
             filings.push({
               cik: cik,
@@ -966,7 +961,7 @@ async function fetchRecentSECFilings(cik: string, filingType: string, cutoffDate
 
     // Sort by filing date (newest first for incremental)
     filings.sort((a, b) => new Date(b.filingDate).getTime() - new Date(a.filingDate).getTime());
-    
+
     console.log(`Found ${filings.length} recent ${filingType} filings for CIK ${cik}`);
     return filings;
 
@@ -976,14 +971,14 @@ async function fetchRecentSECFilings(cik: string, filingType: string, cutoffDate
   }
 }
 
-async function setupScheduledJobs(supabase: any) {
+async function setupScheduledJobs(supabase) {
   console.log('Setting up scheduled jobs for all active BDCs');
-  
+
   try {
-    // Get all active BDCs with fiscal year-end data
+    // FIXED: Get all active BDCs with NEW fiscal year-end columns
     const { data: bdcs, error } = await supabase
       .from('bdc_universe')
-      .select('ticker, company_name, fiscal_year_end')
+      .select('ticker, company_name, fiscal_year_end_month, fiscal_year_end_day')
       .eq('is_active', true);
 
     if (error) {
@@ -993,14 +988,18 @@ async function setupScheduledJobs(supabase: any) {
     let jobsCreated = 0;
 
     for (const bdc of bdcs) {
-      if (!bdc.fiscal_year_end) {
+      // FIXED: Check for NEW fiscal year-end columns
+      if (!bdc.fiscal_year_end_month || !bdc.fiscal_year_end_day) {
         console.warn(`Skipping ${bdc.ticker} - no fiscal year-end date`);
         continue;
       }
 
-      // Calculate filing due dates using the database function
+      // FIXED: Calculate filing due dates using the NEW database function
       const { data: filingDates } = await supabase
-        .rpc('calculate_next_filing_dates', { fye_date: bdc.fiscal_year_end });
+        .rpc('calculate_next_filing_dates', {
+          fye_month: bdc.fiscal_year_end_month,
+          fye_day: bdc.fiscal_year_end_day
+        });
 
       // Create scheduled jobs for each filing type
       for (const filingDate of filingDates) {
@@ -1028,36 +1027,43 @@ async function setupScheduledJobs(supabase: any) {
     await supabase.from('processing_logs').insert({
       log_level: 'info',
       message: 'Scheduled jobs setup completed',
-      details: { jobs_created: jobsCreated, bdcs_processed: bdcs.length }
-    });
-
-    return new Response(
-      JSON.stringify({ 
-        message: 'Scheduled jobs setup completed',
+      details: {
         jobs_created: jobsCreated,
         bdcs_processed: bdcs.length
-      }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
+      }
+    });
+
+    return new Response(JSON.stringify({
+      message: 'Scheduled jobs setup completed',
+      jobs_created: jobsCreated,
+      bdcs_processed: bdcs.length
+    }), {
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/json'
+      }
+    });
 
   } catch (error) {
     console.error('Error setting up scheduled jobs:', error);
-    
+
     // Log error
     await supabase.from('processing_logs').insert({
       log_level: 'error',
       message: 'Failed to setup scheduled jobs',
-      details: { error: error.message }
+      details: {
+        error: error.message
+      }
     });
 
     throw error;
   }
 }
 
-function getQuarterYear(filingDate: string, filingType: string): string {
+function getQuarterYear(filingDate, filingType) {
   const date = new Date(filingDate);
   const year = date.getFullYear();
-  
+
   if (filingType === '10-K') {
     return `Q4-${year}`;
   } else {
