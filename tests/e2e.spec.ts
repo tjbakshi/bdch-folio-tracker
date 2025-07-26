@@ -197,9 +197,9 @@ test.describe('BDC Analytics Application', () => {
       const firstRowText = await tableRows.first().textContent();
       expect(firstRowText?.toLowerCase()).toContain('tech');
     }
-    
+
     // Clear search
-    await searchInput.clear();
+    await searchInput.fill('');
     
     // Open the "Tranche" dropdown using accessible combobox role
     const trancheSelect = page.getByRole('combobox', { name: /Tranche/i });
