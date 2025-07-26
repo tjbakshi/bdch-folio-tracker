@@ -1,3 +1,6 @@
+// File: src/integrations/supabase/types.ts
+// COMPLETE REPLACEMENT - Replace entire file with this code
+
 export type Json =
   | string
   | number
@@ -425,3 +428,183 @@ export const Constants = {
     Enums: {},
   },
 } as const
+
+// ==========================================
+// NEW SEC API TYPES (Added for SEC extraction)
+// ==========================================
+
+export interface Investment {
+  // Core identification fields
+  id?: string;
+  cik: string;
+  ticker: string;
+  accession_number?: string;
+  
+  // Investment details
+  issuer: string;
+  title: string;
+  cusip?: string;
+  
+  // Financial data
+  fair_value: number;
+  cost_basis?: number;
+  principal_amount?: number;
+  shares?: number;
+  interest_rate?: string;
+  
+  // Classification
+  investment_type: string;
+  industry?: string;
+  geography?: string;
+  
+  // Dates
+  maturity_date?: string;
+  filing_date: string;
+  report_date: string;
+  
+  // Status flags
+  is_non_accrual?: boolean;
+  
+  // SEC API specific fields (new)
+  xbrl_concept?: string;
+  filing_form?: string;
+  extraction_method?: 'SEC_API' | 'HTML_FALLBACK' | 'MANUAL' | 'LEGACY';
+  
+  // Additional context
+  footnotes?: string;
+  
+  // Metadata
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface BDC {
+  cik: string;
+  ticker: string;
+  name: string;
+  marketCap?: string;
+  sector?: string;
+  exchange?: string;
+  website?: string;
+  lastFiling?: string;
+}
+
+export interface SECExtractionRequest {
+  action: 'extract_filing' | 'backfill_ticker' | 'backfill_all' | 'incremental_check';
+  ticker?: string;
+  cik?: string;
+  bdcList?: BDC[];
+}
+
+export interface SECExtractionResult {
+  success: boolean;
+  ticker?: string;
+  cik?: string;
+  investmentsFound?: number;
+  message?: string;
+  error?: string;
+  totalInvestments?: number;
+  processed?: number;
+  results?: Array<{
+    ticker: string;
+    cik: string;
+    investmentsFound: number;
+    success: boolean;
+    error?: string;
+  }>;
+}
+
+export interface InvestmentFilters {
+  ticker?: string;
+  investmentType?: string;
+  industry?: string;
+  minFairValue?: number;
+  maxFairValue?: number;
+  filingDateFrom?: string;
+  filingDateTo?: string;
+  isNonAccrual?: boolean;
+  extractionMethod?: string;
+}
+
+export interface InvestmentSummary {
+  totalInvestments: number;
+  totalFairValue: number;
+  averageFairValue: number;
+  byTicker: Record<string, {
+    count: number;
+    totalValue: number;
+    lastFiling: string;
+  }>;
+  byType: Record<string, {
+    count: number;
+    totalValue: number;
+  }>;
+  byExtractionMethod: Record<string, {
+    count: number;
+    totalValue: number;
+  }>;
+}
+
+// Database table interface for type safety
+export interface InvestmentRow {
+  id: string;
+  cik: string;
+  ticker: string;
+  accession_number?: string;
+  issuer: string;
+  title: string;
+  cusip?: string;
+  fair_value: number;
+  cost_basis?: number;
+  principal_amount?: number;
+  shares?: number;
+  interest_rate?: string;
+  investment_type: string;
+  industry?: string;
+  geography?: string;
+  maturity_date?: string;
+  filing_date: string;
+  report_date: string;
+  is_non_accrual?: boolean;
+  xbrl_concept?: string;
+  filing_form?: string;
+  extraction_method?: string;
+  footnotes?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// API response types
+export interface ApiResponse<T = any> {
+  success: boolean;
+  data?: T;
+  error?: string;
+  message?: string;
+}
+
+export interface PaginatedResponse<T> extends ApiResponse<T[]> {
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    pages: number;
+  };
+}
+
+// Form interfaces for admin operations
+export interface BDCSelectionForm {
+  selectedTickers: string[];
+  extractionType: 'single' | 'batch' | 'all';
+}
+
+export interface ExtractionStatus {
+  isRunning: boolean;
+  currentOperation?: string;
+  progress?: {
+    current: number;
+    total: number;
+    currentTicker?: string;
+  };
+  startTime?: Date;
+  estimatedCompletion?: Date;
+}
