@@ -5,6 +5,7 @@ import { Sentry } from '../shared/sentry.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
 };
 
@@ -41,6 +42,13 @@ function safeExtractAccession(accessionNumber) {
 
 Deno.serve(async (req) => {
   return Sentry.withSentry(async () => {
+    // Handle CORS preflight requests FIRST
+    if (req.method === 'OPTIONS') {
+      return new Response('ok', {
+        headers: corsHeaders
+      });
+    }
+
     // Start Sentry transaction for the entire request
     const transaction = Sentry.startTransaction({
       name: `SEC Extractor ${req.method} ${new URL(req.url).pathname}`,
@@ -52,13 +60,6 @@ Deno.serve(async (req) => {
     });
 
     console.log('SEC Extractor function called', new Date().toISOString());
-
-    // Handle CORS preflight requests
-    if (req.method === 'OPTIONS') {
-      return new Response(null, {
-        headers: corsHeaders
-      });
-    }
 
     try {
       // Add request context to Sentry
@@ -73,7 +74,7 @@ Deno.serve(async (req) => {
         Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
       );
 
-      const { action, ticker, yearsBack, years_back, filing_id, filing_type } = await req.json();
+      const { action, ticker, yearsBack, years_back, filing_id, filing_type, batch_size, offset } = await req.json();
 
       console.log(`Processing action: ${action} for ticker: ${ticker || 'all'}`);
 
@@ -82,7 +83,9 @@ Deno.serve(async (req) => {
         action,
         ticker,
         filing_id,
-        filing_type
+        filing_type,
+        batch_size,
+        offset
       });
       Sentry.setTag('action', action);
       if (ticker) Sentry.setTag('ticker', ticker);
@@ -137,6 +140,13 @@ Deno.serve(async (req) => {
             name: 'extractAllInvestments', 
             op: 'sec.extract'
           }, async () => await extractAllInvestments(supabase));
+          break;
+
+        case 'extract_batch_investments':
+          response = await Sentry.startSpan({
+            name: 'extractBatchInvestments',
+            op: 'sec.extract'
+          }, async () => await extractBatchInvestments(supabase, batch_size || 50, offset || 0));
           break;
 
         default:
@@ -1079,6 +1089,109 @@ async function extractInvestmentsFromFilings(supabase, ticker) {
 
 async function extractAllInvestments(supabase) {
   return await extractInvestmentsFromFilings(supabase, null);
+}
+
+// NEW BATCH PROCESSING FUNCTION
+async function extractBatchInvestments(supabase, batchSize = 50, offset = 0) {
+  console.log(`[SENTRY] Starting batch investment extraction: batch_size=${batchSize}, offset=${offset}`);
+  
+  try {
+    const { data: filings, error } = await supabase
+      .from('filings')
+      .select('*')
+      .eq('status', 'pending')
+      .order('filing_date', { ascending: false })
+      .range(offset, offset + batchSize - 1);
+    
+    if (error) throw error;
+    
+    console.log(`Found ${filings.length} filings to process in this batch`);
+    
+    if (filings.length === 0) {
+      return new Response(JSON.stringify({
+        message: 'No more filings to process',
+        processed: 0,
+        investments_extracted: 0,
+        errors: 0,
+        batch_size: batchSize,
+        offset: offset
+      }), {
+        status: 200,
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json'
+        }
+      });
+    }
+    
+    let totalProcessed = 0;
+    let totalInvestments = 0;
+    let errorCount = 0;
+    
+    for (const filing of filings) {
+      try {
+        console.log(`Processing ${filing.ticker} - ${filing.accession_number}`);
+        
+        const investments = await extractInvestmentsFromSingleFiling(supabase, filing);
+        
+        if (investments.length > 0) {
+          totalInvestments += investments.length;
+          console.log(`✅ Extracted ${investments.length} investments from ${filing.ticker}`);
+        } else {
+          console.log(`ℹ️ No investments found in ${filing.ticker} filing`);
+        }
+        
+        await supabase
+          .from('filings')
+          .update({ 
+            status: 'processed',
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', filing.id);
+        
+        totalProcessed++;
+        
+        // Small delay between filings to prevent overwhelming the system
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+      } catch (error) {
+        console.error(`Error processing ${filing.ticker}:`, error);
+        errorCount++;
+        
+        await supabase
+          .from('filings')
+          .update({ 
+            status: 'error',
+            error_message: error.message,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', filing.id);
+      }
+    }
+    
+    const result = {
+      message: 'Batch investment extraction completed',
+      processed: totalProcessed,
+      investments_extracted: totalInvestments,
+      errors: errorCount,
+      batch_size: batchSize,
+      offset: offset
+    };
+    
+    console.log(`[SENTRY] Batch investment extraction completed:`, result);
+    
+    return new Response(JSON.stringify(result), {
+      status: 200,
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+  } catch (error) {
+    console.error(`[SENTRY] Fatal error in batch investment extraction:`, error);
+    throw error;
+  }
 }
 
 async function extractInvestmentsFromSingleFiling(supabase, filing) {
