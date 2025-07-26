@@ -13,21 +13,48 @@ const AdminPanel = () => {
     console.log(`[${type.toUpperCase()}] ${message}`);
   };
 
-  // Helper function to make API calls
+  // Helper function to make API calls with better error handling
   const callSECExtractor = async (payload) => {
-    const response = await fetch('/functions/v1/sec-extractor', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    
-    const result = await response.json();
-    
-    if (!response.ok) {
-      throw new Error(result.error || `API call failed: ${response.status}`);
+    try {
+      console.log('Making API call with payload:', payload);
+      
+      const response = await fetch('/functions/v1/sec-extractor', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      
+      console.log('Response status:', response.status);
+      console.log('Response headers:', response.headers);
+      
+      // Get the raw response text first
+      const responseText = await response.text();
+      console.log('Raw response:', responseText);
+      
+      // Check if response is empty
+      if (!responseText) {
+        throw new Error(`Empty response from server (status: ${response.status})`);
+      }
+      
+      // Try to parse as JSON
+      let result;
+      try {
+        result = JSON.parse(responseText);
+      } catch (jsonError) {
+        console.error('JSON parsing failed:', jsonError);
+        throw new Error(`Invalid JSON response: ${responseText.substring(0, 200)}...`);
+      }
+      
+      if (!response.ok) {
+        throw new Error(result.error || `API call failed: ${response.status} - ${response.statusText}`);
+      }
+      
+      return result;
+      
+    } catch (error) {
+      console.error('API call error:', error);
+      throw error;
     }
-    
-    return result;
   };
 
   // 1. FULL BACKFILL + INVESTMENT EXTRACTION
@@ -56,32 +83,46 @@ const AdminPanel = () => {
     }
   };
 
-  // 2. TEST SINGLE TICKER + INVESTMENT EXTRACTION
+  // 2. TEST SINGLE TICKER + INVESTMENT EXTRACTION (with better error handling)
   const handleTestARCC = async () => {
     setLoading(true);
     try {
-      updateStatus(`🔄 Testing ARCC - downloading filings and extracting investments...`, 'info');
+      updateStatus(`🔄 Testing ARCC - downloading filings...`, 'info');
       
       // Step 1: Backfill filings for ARCC (1 year)
-      await callSECExtractor({ 
+      console.log('Step 1: Starting ARCC backfill...');
+      const filingResult = await callSECExtractor({ 
         action: 'backfill_ticker', 
         ticker: 'ARCC',
         years_back: 1
       });
       
+      console.log('Filing result:', filingResult);
       updateStatus(`✅ Filing backfill for ARCC completed. Now extracting investments...`, 'info');
       
       // Step 2: Extract investments for ARCC
+      console.log('Step 2: Starting ARCC investment extraction...');
       const extractResult = await callSECExtractor({ 
         action: 'extract_investments', 
         ticker: 'ARCC' 
       });
       
+      console.log('Extract result:', extractResult);
       updateStatus(`🎉 ARCC test completed! Processed ${extractResult.processed} filings and extracted ${extractResult.investments_extracted} investments!`, 'success');
       
     } catch (error) {
       console.error('Test ARCC error:', error);
-      updateStatus(`❌ ARCC test failed: ${error.message}`, 'error');
+      
+      // More detailed error messages
+      if (error.message.includes('fetch')) {
+        updateStatus(`❌ Network error: Could not connect to API. Check if your edge function is deployed.`, 'error');
+      } else if (error.message.includes('JSON')) {
+        updateStatus(`❌ API response error: ${error.message}`, 'error');
+      } else if (error.message.includes('500')) {
+        updateStatus(`❌ Server error: Check the function logs in Supabase dashboard.`, 'error');
+      } else {
+        updateStatus(`❌ ARCC test failed: ${error.message}`, 'error');
+      }
     } finally {
       setLoading(false);
     }
@@ -319,9 +360,28 @@ const AdminPanel = () => {
             <button 
               onClick={handleTestARCC}
               disabled={loading}
-              className="w-full bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+              className="w-full bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed mb-2"
             >
               {loading ? '🔄 Testing...' : '🧪 Test ARCC + Extract'}
+            </button>
+            
+            {/* Simple API Test Button */}
+            <button 
+              onClick={async () => {
+                try {
+                  updateStatus('🔄 Testing API connection...', 'info');
+                  const result = await callSECExtractor({ action: 'backfill_ticker', ticker: 'ARCC', years_back: 1 });
+                  updateStatus('✅ API test successful!', 'success');
+                  console.log('API test result:', result);
+                } catch (error) {
+                  updateStatus(`❌ API test failed: ${error.message}`, 'error');
+                  console.error('API test error:', error);
+                }
+              }}
+              disabled={loading}
+              className="w-full bg-gray-500 text-white px-2 py-1 rounded text-xs hover:bg-gray-600 disabled:bg-gray-400"
+            >
+              🔧 Test API Only
             </button>
           </div>
 
