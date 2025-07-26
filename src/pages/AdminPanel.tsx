@@ -133,43 +133,50 @@ const AdminPanel = () => {
     }
   };
 
+  const [batchSize, setBatchSize] = useState(5); // Configurable batch size, default to 5 for memory efficiency
+
   const handleBatchExtraction = async () => {
     try {
-      addLog('🔄 Starting batch extraction (processing in smaller chunks)...', 'info');
+      addLog(`🔄 Starting batch extraction (processing ${batchSize} filings at a time for memory efficiency)...`, 'info');
       
-      // Process in batches of 50 filings
       let batchNumber = 1;
       let hasMore = true;
+      let totalProcessed = 0;
       
       while (hasMore) {
-        addLog(`📦 Processing batch ${batchNumber} (50 filings)...`, 'info');
+        addLog(`📦 Processing batch ${batchNumber} (${batchSize} filings) - Total processed so far: ${totalProcessed}`, 'info');
         
         try {
           const result = await callEdgeFunction('extract_batch_investments', null, { 
-            batch_size: 50,
-            offset: (batchNumber - 1) * 50 
+            batch_size: batchSize,
+            offset: (batchNumber - 1) * batchSize 
           });
           
-          if (result && result.processed < 50) {
+          const processedInBatch = result?.processed || 0;
+          totalProcessed += processedInBatch;
+          
+          if (result && processedInBatch < batchSize) {
             hasMore = false;
-            addLog(`✅ Batch ${batchNumber} completed - processed ${result.processed} filings (final batch)`, 'success');
+            addLog(`✅ Batch ${batchNumber} completed - processed ${processedInBatch} filings (final batch). Total: ${totalProcessed} filings`, 'success');
           } else {
-            addLog(`✅ Batch ${batchNumber} completed - processed 50 filings`, 'success');
+            addLog(`✅ Batch ${batchNumber} completed - processed ${processedInBatch} filings. Total: ${totalProcessed} filings`, 'success');
           }
           
           batchNumber++;
           
-          // Small delay between batches to avoid overwhelming the system
-          await new Promise(resolve => setTimeout(resolve, 2000));
+          // Longer delay between batches to prevent memory buildup
+          await new Promise(resolve => setTimeout(resolve, 3000));
           
         } catch (batchError) {
           addLog(`❌ Batch ${batchNumber} failed: ${batchError.message}`, 'error');
-          addLog('🔄 Continuing with next batch...', 'warning');
+          addLog('🔄 Continuing with next batch after delay...', 'warning');
           batchNumber++;
+          // Extra delay after error to let system recover
+          await new Promise(resolve => setTimeout(resolve, 5000));
         }
       }
       
-      addLog('🎉 Batch extraction completed! All investment data should now be extracted.', 'success');
+      addLog(`🎉 Batch extraction completed! Processed ${totalProcessed} total filings. All investment data should now be extracted.`, 'success');
       
     } catch (error) {
       addLog(`❌ Batch extraction failed: ${error.message}`, 'error');
@@ -239,6 +246,25 @@ const AdminPanel = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
           <div className="bg-white rounded-lg shadow-lg p-6">
             <h2 className="text-xl font-semibold text-gray-900 mb-4">Primary Actions</h2>
+            
+            {/* Batch Size Configuration */}
+            <div className="mb-4 p-3 bg-gray-50 rounded-lg">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Batch Size (filings per batch)
+              </label>
+              <input
+                type="number"
+                min="1"
+                max="50"
+                value={batchSize}
+                onChange={(e) => setBatchSize(parseInt(e.target.value) || 5)}
+                className="w-24 px-3 py-1 border border-gray-300 rounded-md text-sm"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Smaller = safer for memory, larger = faster processing. Recommended: 5 for 20MB+ documents.
+              </p>
+            </div>
+
             <div className="space-y-3">
               <button
                 onClick={handleFullBackfill}
@@ -311,9 +337,9 @@ const AdminPanel = () => {
             <h3 className="font-medium text-blue-800 mb-2">🎯 Next Step: Use Batch Processing</h3>
             <ol className="list-decimal list-inside text-sm text-blue-700 space-y-1">
               <li>Click the "📊 Extract Investments (Batch Processing)" button above</li>
-              <li>This will process your 1000 filings in chunks of 50</li>
-              <li>Each batch takes ~1-2 minutes instead of timing out</li>
-              <li>Watch the logs to see progress through each batch</li>
+              <li>This will process your filings in small chunks of 5 for memory efficiency</li>
+              <li>Each batch takes ~30-60 seconds and uses minimal memory</li>
+              <li>Watch the logs to see progress through each batch with running totals</li>
             </ol>
           </div>
           
@@ -322,9 +348,9 @@ const AdminPanel = () => {
             <ol className="list-decimal list-inside text-sm text-yellow-700 space-y-1">
               <li>Go to: <a href="https://supabase.com/dashboard" className="text-blue-600 underline" target="_blank" rel="noopener noreferrer">Supabase Dashboard</a></li>
               <li>Navigate to: Functions → sec-extractor → Invoke Function</li>
-              <li>Send: <code className="bg-yellow-100 px-2 py-1 rounded">{"{"}"action": "extract_batch_investments", "batch_size": 50, "offset": 0{"}"}</code></li>
-              <li>Wait for completion, then send: <code className="bg-yellow-100 px-2 py-1 rounded">{"{"}"action": "extract_batch_investments", "batch_size": 50, "offset": 50{"}"}</code></li>
-              <li>Continue incrementing offset by 50 until no more results</li>
+              <li>Send: <code className="bg-yellow-100 px-2 py-1 rounded">{"{"}"action": "extract_batch_investments", "batch_size": 5, "offset": 0{"}"}</code></li>
+              <li>Wait for completion, then send: <code className="bg-yellow-100 px-2 py-1 rounded">{"{"}"action": "extract_batch_investments", "batch_size": 5, "offset": 5{"}"}</code></li>
+              <li>Continue incrementing offset by 5 until no more results</li>
             </ol>
           </div>
         </div>
