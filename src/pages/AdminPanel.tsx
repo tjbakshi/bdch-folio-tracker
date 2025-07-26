@@ -1,5 +1,5 @@
-// File: src/pages/admin/bdc.tsx (or wherever your admin page is located)
-// Replace your entire admin page with this code
+// File: src/pages/AdminPanel.tsx
+// COMPLETE REPLACEMENT - Replace entire file with this code
 
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -59,18 +59,43 @@ export default function BDCAdminPage() {
     setCurrentOperation(action);
     
     try {
-      const response = await fetch('/src/pages/api/supabase/functions/sec-extractor', {
+      // Call Supabase function directly
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+      if (!supabaseUrl || !supabaseAnonKey) {
+        throw new Error('Missing Supabase environment variables. Check your .env.local file.');
+      }
+      
+      console.log('🚀 Calling Supabase function directly:', `${supabaseUrl}/functions/v1/sec-extractor`);
+      
+      const response = await fetch(`${supabaseUrl}/functions/v1/sec-extractor`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${supabaseAnonKey}`,
+        },
         body: JSON.stringify({ action, ...data })
       });
       
+      console.log('📡 Response status:', response.status);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ Supabase function error:', errorText);
+        throw new Error(`Supabase function failed: ${response.status} ${response.statusText}`);
+      }
+      
       const result = await response.json();
+      console.log('✅ Function result:', result);
       setResults(result);
       return result;
     } catch (error) {
-      console.error('Error calling SEC extractor:', error);
-      const errorResult = { error: error.message, success: false };
+      console.error('🔥 Error calling SEC extractor:', error);
+      const errorResult = { 
+        error: error instanceof Error ? error.message : 'Unknown error occurred', 
+        success: false 
+      };
       setResults(errorResult);
       return errorResult;
     } finally {
@@ -121,7 +146,7 @@ export default function BDCAdminPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold text-gray-900">BDC Data Management</h1>
         <Badge variant="outline" className="text-sm">
-          SEC API v2.0 - No More HTML Parsing
+          SEC API v2.0 - Direct Supabase Integration
         </Badge>
       </div>
       
@@ -135,9 +160,21 @@ export default function BDCAdminPage() {
                 ✨ New SEC API Integration Active
               </p>
               <p className="text-xs text-blue-700">
-                Using official SEC APIs for reliable data extraction. No more HTML parsing issues!
+                Using official SEC APIs for reliable data extraction. Calling Supabase functions directly!
               </p>
             </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Debug Info */}
+      <Card className="border-yellow-200 bg-yellow-50">
+        <CardContent className="pt-4">
+          <div className="text-xs text-yellow-800">
+            <strong>Debug Info:</strong><br/>
+            Supabase URL: {process.env.NEXT_PUBLIC_SUPABASE_URL ? '✅ Set' : '❌ Missing'}<br/>
+            Supabase Key: {process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? '✅ Set' : '❌ Missing'}<br/>
+            Function URL: {process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/sec-extractor
           </div>
         </CardContent>
       </Card>
@@ -390,16 +427,14 @@ export default function BDCAdminPage() {
             )}
 
             {/* Raw JSON for debugging */}
-            {process.env.NODE_ENV === 'development' && (
-              <details className="mt-4">
-                <summary className="cursor-pointer text-sm text-gray-500 hover:text-gray-700">
-                  Show Raw Response (Development Only)
-                </summary>
-                <pre className="bg-gray-100 p-3 rounded text-xs overflow-auto max-h-64 mt-2">
-                  {JSON.stringify(results, null, 2)}
-                </pre>
-              </details>
-            )}
+            <details className="mt-4">
+              <summary className="cursor-pointer text-sm text-gray-500 hover:text-gray-700">
+                Show Raw Response (Debug Info)
+              </summary>
+              <pre className="bg-gray-100 p-3 rounded text-xs overflow-auto max-h-64 mt-2">
+                {JSON.stringify(results, null, 2)}
+              </pre>
+            </details>
           </CardContent>
         </Card>
       )}
@@ -419,6 +454,7 @@ export default function BDCAdminPage() {
                 <li>• No more memory crashes with large files</li>
                 <li>• 95%+ success rate vs previous parsing failures</li>
                 <li>• 10x faster processing speed</li>
+                <li>• Direct Supabase function calls (no API proxy needed)</li>
               </ul>
             </div>
             <div>
@@ -429,6 +465,7 @@ export default function BDCAdminPage() {
                 <li>• Check Supabase logs for detailed progress</li>
                 <li>• Large BDCs (ARCC) may take 2-3 minutes</li>
                 <li>• SEC API is rate-limited to 10 requests/second</li>
+                <li>• Check browser console for debugging info</li>
               </ul>
             </div>
           </div>
