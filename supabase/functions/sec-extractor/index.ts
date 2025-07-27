@@ -141,10 +141,11 @@ class ScheduleOfInvestmentsExtractor {
     return filings;
   }
 
-  async downloadFilingHTML(filing: SECFiling): Promise<string> {
+  async downloadFilingHTML(filing: SECFiling, cik: string): Promise<string> {
     // Build the URL to the actual HTML filing
-    const accessionNumberForURL = filing.accessionNumber.replace(/-/g, '');
-    const filingURL = `${this.baseURL}/Archives/edgar/data/${parseInt(filing.accessionNumber.split('-')[0])}/${filing.accessionNumber}/${filing.primaryDocument}`;
+    // SEC URL format: https://www.sec.gov/Archives/edgar/data/[CIK]/[ACCESSION_NO]/[PRIMARY_DOC]
+    const cleanCik = cik.replace(/^0+/, ''); // Remove leading zeros for URL
+    const filingURL = `${this.baseURL}/Archives/edgar/data/${cleanCik}/${filing.accessionNumber}/${filing.primaryDocument}`;
     
     console.log(`[SENTRY] Downloading filing: ${filingURL}`);
     
@@ -153,7 +154,18 @@ class ScheduleOfInvestmentsExtractor {
       return htmlContent;
     } catch (error) {
       console.error(`[SENTRY] Failed to download filing ${filing.accessionNumber}:`, error);
-      throw error;
+      
+      // Try alternative URL format if first attempt fails
+      const alternativeURL = `${this.baseURL}/Archives/edgar/data/${cik.padStart(10, '0')}/${filing.accessionNumber}/${filing.primaryDocument}`;
+      console.log(`[SENTRY] Trying alternative URL: ${alternativeURL}`);
+      
+      try {
+        const htmlContent = await this.makeRequest(alternativeURL, true);
+        return htmlContent;
+      } catch (altError) {
+        console.error(`[SENTRY] Alternative URL also failed:`, altError);
+        throw error; // Throw original error
+      }
     }
   }
 
@@ -494,7 +506,7 @@ class ScheduleOfInvestmentsExtractor {
           console.log(`[SENTRY] Processing ${filing.form} filed ${filing.filingDate} for ${ticker}`);
           
           // Download HTML content
-          const htmlContent = await this.downloadFilingHTML(filing);
+          const htmlContent = await this.downloadFilingHTML(filing, cik);
           
           // Parse Schedule of Investments
           const investments = this.parseScheduleOfInvestments(htmlContent, filing, ticker, companyId);
