@@ -79,7 +79,7 @@ class SECAPIExtractor {
   private lastRequestTime = 0;
   private readonly minRequestInterval = 200; // 200ms = 5 requests/second
 
-  private async makeRequest(url: string): Promise<any> {
+Request(url: string): Promise<any> {
     // Implement rate limiting
     const now = Date.now();
     const timeSinceLastRequest = now - this.lastRequestTime;
@@ -145,9 +145,41 @@ class SECAPIExtractor {
       const facts = await this.getCompanyFacts(cik);
       console.log(`[SENTRY] Retrieved facts for ${facts.entityName}`);
 
-      // Get recent filings info
-      const submissions = await this.getCompanySubmissions(cik);
-      console.log(`[SENTRY] Found ${submissions.filings.recent.form.length} recent filings`);
+      // Try to get recent filings info - but don't fail if this doesn't work
+      let submissions: SECSubmission | null = null;
+      try {
+        submissions = await this.getCompanySubmissions(cik);
+        console.log(`[SENTRY] Found ${submissions.filings.recent.form.length} recent filings`);
+      } catch (submissionError) {
+        console.log(`[SENTRY] Could not retrieve submissions (continuing without filing details): ${submissionError.message}`);
+        // Create a minimal submissions object to avoid breaking the extraction
+        submissions = {
+          cik: cik,
+          entityType: '',
+          sic: '',
+          sicDescription: '',
+          name: facts.entityName || ticker,
+          tickers: [ticker],
+          exchanges: [],
+          filings: {
+            recent: {
+              accessionNumber: [],
+              filingDate: [],
+              reportDate: [],
+              acceptanceDateTime: [],
+              form: [],
+              fileNumber: [],
+              filmNumber: [],
+              items: [],
+              size: [],
+              isXBRL: [],
+              isInlineXBRL: [],
+              primaryDocument: [],
+              primaryDocDescription: []
+            }
+          }
+        };
+      }
 
       // Extract investments from XBRL facts
       const investments = await this.extractInvestmentsFromFacts(facts, submissions, ticker, companyId);
@@ -265,15 +297,6 @@ class SECAPIExtractor {
     companyId: string
   ): Investment | null {
     try {
-      // Find the corresponding filing info
-      const accessionNumber = fact.accn;
-      const filingIndex = submissions.filings.recent.accessionNumber.indexOf(accessionNumber);
-      
-      if (filingIndex === -1) {
-        console.log(`[SENTRY] No filing found for accession ${accessionNumber}`);
-        return null;
-      }
-
       const fairValue = parseFloat(fact.val) || 0;
       
       // Skip zero or very small values (likely not real investments)
@@ -281,12 +304,26 @@ class SECAPIExtractor {
         return null;
       }
 
-      const formType = submissions.filings.recent.form[filingIndex];
-      const filingDate = submissions.filings.recent.filingDate[filingIndex];
-      const reportDate = fact.end || submissions.filings.recent.reportDate[filingIndex];
+      // Try to find the corresponding filing info
+      const accessionNumber = fact.accn;
+      let filingIndex = -1;
+      let formType = 'Unknown';
+      let filingDate = fact.filed || '2024-01-01';
+      
+      if (submissions && submissions.filings.recent.accessionNumber.length > 0) {
+        filingIndex = submissions.filings.recent.accessionNumber.indexOf(accessionNumber);
+        
+        if (filingIndex !== -1) {
+          formType = submissions.filings.recent.form[filingIndex];
+          filingDate = submissions.filings.recent.filingDate[filingIndex];
+        }
+      }
+      
+      // Use fact data if available, otherwise use defaults
+      const reportDate = fact.end || filingDate;
 
       // Generate unique raw_id
-      const rawId = `${ticker}_${concept}_${accessionNumber}_${reportDate}_${fairValue}`;
+      const rawId = `${ticker}_${concept}_${accessionNumber || 'unknown'}_${reportDate}_${fairValue}`;
 
       const investment: Investment = {
         company_id: companyId,
@@ -297,7 +334,7 @@ class SECAPIExtractor {
         reporting_date: reportDate,
         filing_date: filingDate,
         form_type: formType,
-        accession_number: accessionNumber,
+        accession_number: accessionNumber || 'unknown',
         fiscal_year: fact.fy || new Date(filingDate).getFullYear(),
         fiscal_period: fact.fp || 'FY',
         non_accrual: false, // Default, would need additional logic to determine
