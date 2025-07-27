@@ -1,7 +1,7 @@
 import * as cheerio from 'https://esm.sh/cheerio@1.0.0-rc.12';
 
 function cleanText(value: string): string {
-  return value?.replace(/\s+/g, ' ').replace(/["']/g, '').trim() || '';
+  return value?.replace(/\s+/g, ' ').replace(/["]+/g, '').trim() || '';
 }
 
 function parseAmount(value: string): number | undefined {
@@ -22,19 +22,21 @@ function extractHeaders($: cheerio.CheerioAPI, table: cheerio.Element): Record<s
 
   headers.each((index, el) => {
     const text = $(el).text().toLowerCase().trim();
-    if (/company|security|name/.test(text)) mapping.company = index;
-    if (/industry|business/.test(text)) mapping.industry = index;
+    console.log(`[SENTRY] Header ${index}: ${text}`);
+
+    if (/company|security|name|investment/.test(text)) mapping.company = index;
+    if (/industry|business|sector/.test(text)) mapping.industry = index;
     if (/description/.test(text)) mapping.business_description = index;
     if (/tranche|type|class/.test(text)) mapping.investment_type = index;
-    if (/coupon|rate/.test(text)) mapping.coupon = index;
+    if (/coupon|rate|interest/.test(text)) mapping.coupon = index;
     if (/reference/.test(text)) mapping.reference = index;
     if (/spread|margin/.test(text)) mapping.spread = index;
     if (/acquisition|purchase/.test(text)) mapping.acquisition_date = index;
     if (/maturity/.test(text)) mapping.maturity_date = index;
     if (/shares|units/.test(text)) mapping.shares_units = index;
-    if (/principal|notional/.test(text)) mapping.principal = index;
-    if (/amortized/.test(text)) mapping.amortized_cost = index;
-    if (/fair value|market/.test(text)) mapping.fair_value = index;
+    if (/principal|notional|par value/.test(text)) mapping.principal = index;
+    if (/amortized|cost/.test(text)) mapping.amortized_cost = index;
+    if (/fair value|value|market/.test(text)) mapping.fair_value = index;
   });
 
   return mapping;
@@ -50,6 +52,7 @@ export function parseScheduleOfInvestments(html: string): any[] {
     if (score < 3) return;
 
     const headers = extractHeaders($, table);
+    console.log("[SENTRY] Column mapping:", headers);
     if (!headers.company || !headers.fair_value) return;
 
     $(table).find('tr').slice(1).each((_, row) => {
