@@ -231,42 +231,89 @@ class SECFilingExtractor {
     const investments: PortfolioInvestment[] = [];
     
     try {
-      // Remove extra whitespace and normalize
+      // Clean and normalize text
       const cleanText = text.replace(/\s+/g, ' ').trim();
       
-      // Look for common investment patterns in BDC filings
-      // Pattern: Company Name ... Investment Type ... Amount
-      const patterns = [
-        // Pattern for "Company Name ... First lien ... $XX,XXX"
-        /([A-Z][a-zA-Z\s&.,'-]+?)[\s\.]+([Ff]irst\s+lien[^$]*?)\$?([\d,]+)/g,
-        // Pattern for "Company Name ... Senior secured ... $XX,XXX"  
-        /([A-Z][a-zA-Z\s&.,'-]+?)[\s\.]+([Ss]enior\s+secured[^$]*?)\$?([\d,]+)/g,
-        // Pattern for "Company Name ... Subordinated ... $XX,XXX"
-        /([A-Z][a-zA-Z\s&.,'-]+?)[\s\.]+([Ss]ubordinated[^$]*?)\$?([\d,]+)/g,
-        // Pattern for "Company Name ... Preferred ... $XX,XXX"
-        /([A-Z][a-zA-Z\s&.,'-]+?)[\s\.]+([Pp]referred[^$]*?)\$?([\d,]+)/g,
-        // Pattern for "Company Name ... Common stock ... $XX,XXX"
-        /([A-Z][a-zA-Z\s&.,'-]+?)[\s\.]+([Cc]ommon\s+stock[^$]*?)\$?([\d,]+)/g,
-      ];
+      console.log(`[SENTRY] Analyzing text section for investment patterns...`);
+      
+      // More sophisticated patterns for BDC filings
+      // Pattern 1: Table-like structure with company names and dollar amounts
+      const tablePattern = /([A-Z][a-zA-Z\s&.,'\-()]+?)[\s\.]{2,}[\$]?([\d,]+)[\s\.\$]*(?:thousand|million)?/g;
+      
+      // Pattern 2: Structured entries with investment details
+      const structuredPattern = /([A-Z][a-zA-Z\s&.,'\-()]{3,50}?)[\s\-\.]+([Ff]irst\s+lien|[Ss]enior\s+secured|[Ss]ubordinated|[Pp]referred|[Cc]ommon|[Ee]quity|[Dd]ebt)[^$\d]*?[\$]?([\d,]+)/g;
+      
+      // Pattern 3: Investment entries with percentages and amounts
+      const percentagePattern = /([A-Z][a-zA-Z\s&.,'\-()]{3,50}?)[^$\d]*?([\d,.]+)%[^$\d]*?[\$]?([\d,]+)/g;
+      
+      // Pattern 4: Simple company name followed by amount
+      const simplePattern = /([A-Z][a-zA-Z\s&.,'\-()]{5,40}?)[\s\.\-]{3,}[\$]?([\d,]{4,})/g;
       
       let investmentIndex = 0;
+      const processedCompanies = new Set(); // Avoid duplicates
       
-      for (const pattern of patterns) {
+      const patterns = [
+        { regex: structuredPattern, type: 'structured', priority: 1 },
+        { regex: percentagePattern, type: 'percentage', priority: 2 },
+        { regex: tablePattern, type: 'table', priority: 3 },
+        { regex: simplePattern, type: 'simple', priority: 4 }
+      ];
+      
+      for (const { regex, type, priority } of patterns) {
+        console.log(`[SENTRY] Trying ${type} pattern...`);
+        let matches = 0;
         let match;
-        while ((match = pattern.exec(cleanText)) !== null) {
-          const companyName = match[1]?.trim();
-          const investmentType = match[2]?.trim();
-          const amountStr = match[3]?.replace(/,/g, '');
-          
-          if (companyName && investmentType && amountStr) {
+        
+        // Reset regex
+        regex.lastIndex = 0;
+        
+        while ((match = regex.exec(cleanText)) !== null && investmentIndex < 200) {
+          try {
+            let companyName = match[1]?.trim();
+            let investmentType = 'Other';
+            let amountStr = '';
+            
+            if (type === 'structured') {
+              investmentType = match[2]?.trim() || 'Other';
+              amountStr = match[3]?.replace(/,/g, '') || '0';
+            } else if (type === 'percentage') {
+              amountStr = match[3]?.replace(/,/g, '') || '0';
+              investmentType = 'Investment';
+            } else {
+              amountStr = match[2]?.replace(/,/g, '') || '0';
+            }
+            
+            // Clean company name
+            companyName = companyName
+              .replace(/[^\w\s&.,'\-()]/g, ' ')
+              .replace(/\s+/g, ' ')
+              .trim();
+            
             const fairValue = parseInt(amountStr);
             
-            // Skip if values don't make sense
-            if (fairValue < 1000 || companyName.length < 3 || companyName.length > 100) {
+            // Validation checks
+            if (!companyName || 
+                companyName.length < 3 || 
+                companyName.length > 100 ||
+                fairValue < 1000 ||
+                processedCompanies.has(companyName.toLowerCase()) ||
+                /^(total|subtotal|other|various|misc|n\/a|none)$/i.test(companyName)) {
               continue;
             }
             
-            // Create investment record
+            // Additional filters for common false positives
+            if (companyName.match(/^(page|table|schedule|investments?|portfolio|fair|value|amount|date|maturity)$/i)) {
+              continue;
+            }
+            
+            processedCompanies.add(companyName.toLowerCase());
+            
+            // Determine fair value multiplier (thousands assumed)
+            let finalFairValue = fairValue;
+            if (fairValue < 100000) { // Likely in thousands
+              finalFairValue = fairValue * 1000;
+            }
+            
             const rawId = `${ticker}_${filing.accessionNumber}_${investmentIndex}`;
             
             const investment: PortfolioInvestment = {
@@ -274,7 +321,7 @@ class SECFilingExtractor {
               raw_id: rawId,
               portfolio_company: companyName,
               investment_type: investmentType,
-              fair_value: fairValue * 1000, // Convert to actual dollars (assuming thousands)
+              fair_value: finalFairValue,
               reporting_date: filing.reportDate,
               filing_date: filing.filingDate,
               form_type: filing.form,
@@ -282,31 +329,105 @@ class SECFilingExtractor {
               fiscal_year: new Date(filing.filingDate).getFullYear(),
               fiscal_period: filing.form === '10-K' ? 'FY' : 'Q' + Math.ceil((new Date(filing.reportDate).getMonth() + 1) / 3),
               non_accrual: investmentType.toLowerCase().includes('non-accrual'),
-              extraction_method: 'TEXT_PATTERN_MATCHING',
-              footnotes: `Extracted via pattern matching from ${filing.form}`
+              extraction_method: `TEXT_PATTERN_${type.toUpperCase()}`,
+              footnotes: `Extracted via ${type} pattern from ${filing.form}`
             };
             
             investments.push(investment);
             investmentIndex++;
+            matches++;
             
-            // Limit to prevent runaway extraction
-            if (investmentIndex >= 200) {
-              console.log(`[SENTRY] Reached investment limit for this filing`);
-              break;
+            if (matches <= 5) { // Log first few matches for debugging
+              console.log(`[SENTRY] Found investment: ${companyName} = ${finalFairValue.toLocaleString()}`);
             }
+            
+          } catch (error) {
+            console.error(`[SENTRY] Error processing match:`, error);
           }
         }
         
-        if (investmentIndex >= 200) break;
+        console.log(`[SENTRY] ${type} pattern found ${matches} investments`);
+        
+        // If we found good results with a higher priority pattern, stop
+        if (matches > 5 && priority <= 2) {
+          break;
+        }
       }
       
-      console.log(`[SENTRY] Pattern matching extracted ${investments.length} investments`);
+      // If no patterns worked, try a more aggressive approach
+      if (investments.length === 0) {
+        console.log(`[SENTRY] No patterns worked, trying aggressive dollar amount extraction...`);
+        this.tryAggressiveExtraction(cleanText, filing, ticker, companyId, investments);
+      }
+      
+      console.log(`[SENTRY] Total pattern matching extracted ${investments.length} investments`);
       
     } catch (error) {
       console.error(`[SENTRY] Error in pattern matching:`, error);
     }
     
     return investments;
+  }
+
+  private tryAggressiveExtraction(text: string, filing: SECFiling, ticker: string, companyId: string, investments: PortfolioInvestment[]): void {
+    console.log(`[SENTRY] Attempting aggressive extraction...`);
+    
+    try {
+      // Look for any line that has a company name and a dollar amount
+      const lines = text.split(/[\r\n]+/);
+      let investmentIndex = investments.length;
+      
+      for (const line of lines) {
+        if (investmentIndex >= 50) break; // Limit aggressive extraction
+        
+        const trimmedLine = line.trim();
+        if (trimmedLine.length < 10 || trimmedLine.length > 200) continue;
+        
+        // Look for dollar amounts in the line
+        const dollarMatches = trimmedLine.match(/\$?([\d,]+)/g);
+        if (!dollarMatches || dollarMatches.length === 0) continue;
+        
+        // Look for what could be a company name (starts with capital letter)
+        const companyMatch = trimmedLine.match(/^([A-Z][a-zA-Z\s&.,'\-()]{5,60}?)[\s\-\.]/);
+        if (!companyMatch) continue;
+        
+        const companyName = companyMatch[1].trim();
+        const largestAmount = Math.max(...dollarMatches.map(m => parseInt(m.replace(/[$,]/g, ''))));
+        
+        if (largestAmount > 1000 && companyName.length > 3) {
+          const rawId = `${ticker}_${filing.accessionNumber}_aggressive_${investmentIndex}`;
+          
+          const investment: PortfolioInvestment = {
+            company_id: companyId,
+            raw_id: rawId,
+            portfolio_company: companyName,
+            investment_type: 'Investment',
+            fair_value: largestAmount * 1000, // Assume thousands
+            reporting_date: filing.reportDate,
+            filing_date: filing.filingDate,
+            form_type: filing.form,
+            accession_number: filing.accessionNumber,
+            fiscal_year: new Date(filing.filingDate).getFullYear(),
+            fiscal_period: filing.form === '10-K' ? 'FY' : 'Q' + Math.ceil((new Date(filing.reportDate).getMonth() + 1) / 3),
+            non_accrual: false,
+            extraction_method: 'TEXT_AGGRESSIVE',
+            footnotes: `Aggressive extraction from ${filing.form}`
+          };
+          
+          investments.push(investment);
+          investmentIndex++;
+          
+          if (investmentIndex <= 5) {
+            console.log(`[SENTRY] Aggressive found: ${companyName} = ${(largestAmount * 1000).toLocaleString()}`);
+          }
+        }
+      }
+      
+      console.log(`[SENTRY] Aggressive extraction found ${investmentIndex - investments.length} additional investments`);
+      
+    } catch (error) {
+      console.error(`[SENTRY] Error in aggressive extraction:`, error);
+    }
   }
 
   async extractBDCInvestments(cik: string, ticker: string, supabase: any): Promise<PortfolioInvestment[]> {
