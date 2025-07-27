@@ -1,8 +1,9 @@
 // File: supabase/functions/sec-extractor/index.ts
-// COMPLETE REPLACEMENT - Fixed SEC Filing Access
+// COMPLETE REPLACEMENT - Enhanced SEC Filing Access with Structured HTML Parsing
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { parseScheduleOfInvestments } from './parse_scheduel_test.ts';
 
 // Types for Schedule of Investments data
 interface PortfolioInvestment {
@@ -153,8 +154,6 @@ class SECFilingExtractor {
       `${this.archivesURL}/${cik.padStart(10, '0')}/${filing.accessionNumber}/${filing.primaryDocument}`,
       // Alternative format without dashes in accession number
       `${this.archivesURL}/${cleanCik}/${filing.accessionNumber.replace(/-/g, '')}/${filing.primaryDocument}`,
-      // Direct index format
-      `${this.archivesURL}/${cleanCik}/${filing.accessionNumber}/index.html`,
     ];
     
     console.log(`[SENTRY] Attempting to download filing ${filing.accessionNumber} (${filing.form})`);
@@ -181,10 +180,8 @@ class SECFilingExtractor {
     throw new Error(`All URL variations failed for filing ${filing.accessionNumber}`);
   }
 
-  async extractInvestmentsFromText(content: string, filing: SECFiling, ticker: string, companyId: string): Promise<PortfolioInvestment[]> {
+  async extractInvestmentsFromContent(content: string, filing: SECFiling, ticker: string, companyId: string): Promise<PortfolioInvestment[]> {
     console.log(`[SENTRY] Extracting investments from content (${content.length} chars)`);
-    
-    const investments: PortfolioInvestment[] = [];
     
     try {
       // Look for Schedule of Investments sections in the content
@@ -193,40 +190,122 @@ class SECFilingExtractor {
       
       if (!matches) {
         console.log(`[SENTRY] No "Schedule of Investments" found in filing content`);
-        return investments;
+        return [];
       }
       
       console.log(`[SENTRY] Found ${matches.length} "Schedule of Investments" references`);
       
-      // Find the main investment schedule section
-      const lowerContent = content.toLowerCase();
-      const scheduleStart = lowerContent.indexOf('schedule of investments');
-      
-      if (scheduleStart === -1) {
-        return investments;
-      }
-      
-      // Extract a larger section around the schedule for better context
-      const extractStart = Math.max(0, scheduleStart - 10000);
-      const extractEnd = Math.min(content.length, scheduleStart + 100000);
-      const scheduleSection = content.substring(extractStart, extractEnd);
-      
+      // Extract the relevant section (look for the main investment table)
+      const scheduleSection = this.extractScheduleSection(content);
       console.log(`[SENTRY] Extracted schedule section (${scheduleSection.length} chars)`);
       
+      if (!scheduleSection) {
+        console.log("[SENTRY] Could not extract schedule section");
+        return [];
+      }
+      
+      // Use the enhanced HTML table parser
+      console.log("[SENTRY] Using enhanced schedule parser...");
+      const investments = parseScheduleOfInvestments(scheduleSection);
+      
+      console.log(`[SENTRY] Enhanced parser extracted ${investments.length} investments`);
+      
+      if (investments.length === 0) {
+        console.log("[SENTRY] No investments found with enhanced parser, trying legacy method");
+        return this.extractInvestmentsLegacy(scheduleSection, filing, ticker, companyId);
+      }
+      
+      // Format for database
+      const formattedInvestments = investments.map((inv, index) => ({
+        company_id: companyId,
+        raw_id: `${ticker}_${filing.accessionNumber}_enhanced_${index}`,
+        portfolio_company: inv.company || '',
+        business_description: inv.business_description || '',
+        investment_type: inv.investment_type || '',
+        coupon: inv.coupon || '',
+        reference_rate: inv.reference || '',
+        spread: inv.spread || '',
+        acquisition_date: inv.acquisition_date || '',
+        maturity_date: inv.maturity_date || '',
+        shares_units: inv.shares_units ? parseFloat(inv.shares_units) : undefined,
+        principal: inv.principal || 0,
+        amortized_cost: inv.amortized_cost || 0,
+        fair_value: inv.fair_value || 0,
+        percentage_of_net_assets: inv.percent_of_net_assets || 0,
+        reporting_date: filing.reportDate,
+        filing_date: filing.filingDate,
+        form_type: filing.form,
+        accession_number: filing.accessionNumber,
+        fiscal_year: new Date(filing.filingDate).getFullYear(),
+        fiscal_period: filing.form === '10-K' ? 'FY' : 'Q' + Math.ceil((new Date(filing.reportDate).getMonth() + 1) / 3),
+        non_accrual: false,
+        extraction_method: 'ENHANCED_HTML_PARSER',
+        footnotes: `Enhanced HTML parsing from ${filing.form}`
+      }));
+      
+      console.log(`[SENTRY] Formatted ${formattedInvestments.length} investments for database`);
+      return formattedInvestments;
+      
+    } catch (error) {
+      console.error(`[SENTRY] Error in enhanced extraction:`, error);
+      return this.extractInvestmentsLegacy(content, filing, ticker, companyId);
+    }
+  }
+
+  private extractScheduleSection(content: string): string {
+    // Look for the main investment table section
+    const patterns = [
+      // Look for HTML table containing schedule
+      /<table[^>]*>[\s\S]*?schedule\s+of\s+investments[\s\S]*?<\/table>/gi,
+      // Look for section starting with schedule of investments
+      /schedule\s+of\s+investments[\s\S]{0,50000}?(?=<\/table>|<table|schedule\s+of|consolidated)/gi,
+      // Broader pattern to capture investment tables
+      /<table[^>]*>[\s\S]*?(?:company|investment|principal|fair\s+value)[\s\S]*?<\/table>/gi
+    ];
+    
+    for (const pattern of patterns) {
+      const matches = content.match(pattern);
+      if (matches && matches.length > 0) {
+        // Return the longest match (likely the main table)
+        const longestMatch = matches.reduce((a, b) => a.length > b.length ? a : b);
+        if (longestMatch.length > 1000) { // Ensure it's substantial
+          return longestMatch;
+        }
+      }
+    }
+    
+    // If no table patterns work, try to extract a large section around "schedule of investments"
+    const scheduleIndex = content.toLowerCase().indexOf('schedule of investments');
+    if (scheduleIndex !== -1) {
+      const start = Math.max(0, scheduleIndex - 5000);
+      const end = Math.min(content.length, scheduleIndex + 110000); // Get up to 110k chars
+      return content.substring(start, end);
+    }
+    
+    return content; // Return full content as fallback
+  }
+
+  // Keep legacy extraction as fallback
+  private extractInvestmentsLegacy(content: string, filing: SECFiling, ticker: string, companyId: string): PortfolioInvestment[] {
+    console.log("[SENTRY] Using legacy extraction method...");
+    
+    const investments: PortfolioInvestment[] = [];
+    
+    try {
       // First, try to parse as HTML structure (most likely case)
-      const htmlInvestments = this.parseHTMLInvestments(scheduleSection, filing, ticker, companyId);
+      const htmlInvestments = this.parseHTMLInvestments(content, filing, ticker, companyId);
       investments.push(...htmlInvestments);
       
       // If HTML parsing didn't work, try text patterns
       if (investments.length === 0) {
-        const textInvestments = this.parseInvestmentEntriesFromText(scheduleSection, filing, ticker, companyId);
+        const textInvestments = this.parseInvestmentEntriesFromText(content, filing, ticker, companyId);
         investments.push(...textInvestments);
       }
       
       // If still nothing, try to log some sample content for debugging
       if (investments.length === 0) {
         console.log(`[SENTRY] No investments found. Sample content:`);
-        const sampleLines = scheduleSection.split('\n').slice(0, 20);
+        const sampleLines = content.split('\n').slice(0, 20);
         for (let i = 0; i < Math.min(5, sampleLines.length); i++) {
           const line = sampleLines[i].trim();
           if (line.length > 10) {
@@ -560,8 +639,8 @@ class SECFilingExtractor {
           // Download filing content
           const content = await this.downloadFiling(filing, cik);
           
-          // Extract investments using text patterns
-          const investments = await this.extractInvestmentsFromText(content, filing, ticker, companyId);
+          // Extract investments using enhanced parsing
+          const investments = await this.extractInvestmentsFromContent(content, filing, ticker, companyId);
           
           allInvestments.push(...investments);
           
@@ -747,9 +826,9 @@ serve(async (req) => {
       return new Response(
         JSON.stringify({
           success: true,
-          message: 'SEC Extractor (Text Pattern Matching) is running. Extracts from 2017-2024. Supported actions: extract_filing, backfill_ticker, backfill_all, incremental_check',
+          message: 'SEC Extractor (Enhanced HTML Parser) is running. Extracts from 2017-2024. Supported actions: extract_filing, backfill_ticker, backfill_all, incremental_check',
           available_actions: ['extract_filing', 'backfill_ticker', 'backfill_all', 'incremental_check'],
-          extraction_method: 'TEXT_PATTERN_MATCHING',
+          extraction_method: 'ENHANCED_HTML_PARSER',
           time_period: '2017-2024'
         }),
         {
@@ -778,7 +857,7 @@ serve(async (req) => {
             cik,
             investmentsFound: investments.length,
             message: `Successfully processed ${ticker}: ${investments.length} portfolio investments found`,
-            extraction_method: 'TEXT_PATTERN_MATCHING'
+            extraction_method: 'ENHANCED_HTML_PARSER'
           }),
           {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -824,7 +903,7 @@ serve(async (req) => {
             cik: targetCik,
             investmentsFound: investments.length,
             message: `Backfill completed for ${ticker}: ${investments.length} portfolio investments found`,
-            extraction_method: 'TEXT_PATTERN_MATCHING'
+            extraction_method: 'ENHANCED_HTML_PARSER'
           }),
           {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -909,7 +988,7 @@ serve(async (req) => {
             totalInvestments,
             results,
             message: `Investment extraction completed: ${totalInvestments} total portfolio investments processed (2017-2024)`,
-            extraction_method: 'TEXT_PATTERN_MATCHING',
+            extraction_method: 'ENHANCED_HTML_PARSER',
             time_period: '2017-2024'
           }),
           {
@@ -925,7 +1004,7 @@ serve(async (req) => {
           JSON.stringify({
             success: true,
             message: 'Incremental investment check completed - feature coming soon',
-            extraction_method: 'TEXT_PATTERN_MATCHING'
+            extraction_method: 'ENHANCED_HTML_PARSER'
           }),
           {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -951,7 +1030,7 @@ serve(async (req) => {
       JSON.stringify({
         error: error.message,
         success: false,
-        extraction_method: 'TEXT_PATTERN_MATCHING'
+        extraction_method: 'ENHANCED_HTML_PARSER'
       }),
       {
         status: 500,
