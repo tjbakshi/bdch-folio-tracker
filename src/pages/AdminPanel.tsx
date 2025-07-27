@@ -11,7 +11,7 @@ import { supabase } from '@/integrations/supabase/client';
 
 interface BDC {
   id: string;
-  cik: number;
+  cik: string;
   ticker: string;
   company_name: string;
   is_active: boolean;
@@ -74,7 +74,7 @@ export default function BDCAdminPage() {
         setBdcList([
           {
             id: 'fallback-1',
-            cik: 1287750,
+            cik: '1287750',
             ticker: 'ARCC',
             company_name: 'Ares Capital Corporation',
             is_active: true,
@@ -85,7 +85,7 @@ export default function BDCAdminPage() {
           },
           {
             id: 'fallback-2',
-            cik: 1287032, // Corrected PSEC CIK
+            cik: '1287032', // Corrected PSEC CIK
             ticker: 'PSEC',
             company_name: 'Prospect Capital Corporation',
             is_active: true,
