@@ -1,5 +1,5 @@
 import { assertEquals, assertExists } from "https://deno.land/std@0.208.0/assert/mod.ts";
-import { DOMParser } from "deno_dom";
+import { DOMParser } from "https://deno.land/x/deno_dom@v0.1.43/deno-dom-wasm.ts";
 import * as cheerio from 'https://esm.sh/cheerio@1.0.0-rc.12';
 
 // Mock HTML snippets representing different SEC filing formats
