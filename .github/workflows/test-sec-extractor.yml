@@ -1,0 +1,37 @@
+name: Test SEC Extractor
+
+on:
+  workflow_dispatch:
+    inputs:
+      ticker:
+        description: 'Ticker symbol to test (e.g. ARCC)'
+        required: true
+        default: 'ARCC'
+      cik:
+        description: 'CIK to test (e.g. 1287750)'
+        required: true
+        default: '1287750'
+
+jobs:
+  call-sec-extractor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 🔒 Check out repo (needed for actions)
+        uses: actions/checkout@v4
+
+      - name: 🚀 Call SEC Extractor Function
+        env:
+          SUPABASE_FUNCTIONS_URL: ${{ secrets.SUPABASE_FUNCTIONS_URL }}
+          ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          echo "Testing sec-extractor for ${{ github.event.inputs.ticker }} (${{ github.event.inputs.cik }})"
+          curl -X POST \
+            "$SUPABASE_FUNCTIONS_URL/sec-extractor" \
+            -H "apikey: $ANON_KEY" \
+            -H "Authorization: Bearer $ANON_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "action":"extract_filing",
+              "ticker":"'"${{ github.event.inputs.ticker }}"'",
+              "cik":"'"${{ github.event.inputs.cik }}"'"
+            }'
