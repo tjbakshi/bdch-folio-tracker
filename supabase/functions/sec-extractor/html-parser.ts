@@ -72,6 +72,13 @@ function extractColumnMapping($: any, table: any): { [key: string]: number } {
     headerRow = $(table).find('tr').first();
   }
   
+  // Debug: Log actual headers found
+  console.log("[SENTRY] Found headers:");
+  headerRow.find('th, td').each((index: number, cell: any) => {
+    const headerText = $(cell).text().trim();
+    console.log(`[SENTRY] Column ${index}: "${headerText}"`);
+  });
+  
   headerRow.find('th, td').each((index: number, cell: any) => {
     const headerText = $(cell).text().trim().toLowerCase();
     
@@ -121,8 +128,10 @@ export class BDCTableParser {
     const investments: any[] = [];
     const $ = this.$;
     
-    // Find tables with investment indicators
+    // Find tables with investment indicators - limit to first 5 tables for performance
     $('table').each((i: number, table: any) => {
+      if (i >= 5) return false; // Only process first 5 tables
+      
       const score = getTableHeaderScore($, table);
       console.log(`[SENTRY] Table ${i + 1} score: ${score}`);
       
@@ -153,14 +162,17 @@ export class BDCTableParser {
     const mapping = extractColumnMapping($, table);
     console.log("[SENTRY] Column mapping:", Object.keys(mapping));
     
-    if (Object.keys(mapping).length < 2) {
+    // Lowered threshold from 2 to 1
+    if (Object.keys(mapping).length < 1) {
       console.log("[SENTRY] Insufficient column mapping, skipping table");
       return [];
     }
     
-    // Parse each data row
+    // Parse each data row - limit to first 50 rows for performance
+    let rowCount = 0;
     $(table).find('tr').each((index: number, row: any) => {
       if (index === 0) return; // Skip header row
+      if (rowCount >= 50) return false; // Limit rows processed
       
       const cells = $(row).find('td');
       if (cells.length < 3) return; // Skip rows with too few cells
@@ -176,7 +188,10 @@ export class BDCTableParser {
       
       if (investment && this.isValidInvestment(investment)) {
         investments.push(investment);
+        console.log(`[SENTRY] Found investment: ${investment.company}`);
       }
+      
+      rowCount++;
     });
     
     return investments;
@@ -229,6 +244,21 @@ export class BDCTableParser {
     // Extract acquisition date
     if (mapping.acquisition_date !== undefined) {
       investment.acquisition_date = parseDateValue($(cells).eq(mapping.acquisition_date).text());
+    }
+    
+    // If no specific mappings found, try to extract from first few columns as fallback
+    if (Object.keys(mapping).length === 0 && cells.length >= 3) {
+      console.log("[SENTRY] No column mapping, trying fallback extraction");
+      
+      // Assume first column is company, last few are amounts
+      const firstCol = cleanTextValue($(cells).eq(0).text());
+      const lastCol = parseNumericValue($(cells).eq(cells.length - 1).text());
+      const secondLastCol = parseNumericValue($(cells).eq(cells.length - 2).text());
+      
+      if (firstCol && firstCol.length > 2 && (lastCol || secondLastCol)) {
+        investment.company = firstCol;
+        investment.fair_value = lastCol || secondLastCol;
+      }
     }
     
     return investment;
