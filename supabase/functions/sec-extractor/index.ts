@@ -368,22 +368,7 @@ async function saveInvestmentsToDatabase(supabase: any, investments: Investment[
   console.log(`[SENTRY] Saving ${investments.length} investments to database`);
 
   try {
-    // Check if table exists first
-    const { data: tables, error: tableError } = await supabase
-      .from('information_schema.tables')
-      .select('table_name')
-      .eq('table_name', 'bdc_investments')
-      .eq('table_schema', 'public')
-      .single()
-      .catch(() => null);
-
-    if (!tables) {
-      console.log('[SENTRY] bdc_investments table does not exist, creating temporary log instead');
-      console.log(`[SENTRY] Would have saved investments:`, JSON.stringify(investments.slice(0, 3), null, 2));
-      return;
-    }
-
-    // Use the correct table name from your schema
+    // Try to save directly first
     const { data, error } = await supabase
       .from('bdc_investments')
       .upsert(investments, {
@@ -412,59 +397,56 @@ async function saveInvestmentsToDatabase(supabase: any, investments: Investment[
 async function ensureBDCCompany(supabase: any, ticker: string, cik: string): Promise<string> {
   console.log(`[SENTRY] Looking for company: ${ticker}`);
   
-  // First check if bdc_companies table exists
-  const { data: tables, error: tableError } = await supabase
-    .rpc('check_table_exists', { table_name: 'bdc_companies' })
-    .catch(() => null);
+  try {
+    // Try to find existing company
+    const { data: existing, error: findError } = await supabase
+      .from('bdc_companies')
+      .select('id')
+      .eq('ticker', ticker.toUpperCase())
+      .single();
 
-  if (tableError || !tables) {
-    console.log(`[SENTRY] bdc_companies table may not exist, creating company record in alternative way`);
-    // Return a default company ID for now
-    return `${ticker.toLowerCase()}_${cik}`;
-  }
+    if (existing && !findError) {
+      console.log(`[SENTRY] Found existing company: ${ticker} with ID: ${existing.id}`);
+      return existing.id;
+    }
 
-  // Try to find existing company
-  const { data: existing, error: findError } = await supabase
-    .from('bdc_companies')
-    .select('id')
-    .eq('ticker', ticker.toUpperCase())
-    .single();
-
-  if (existing && !findError) {
-    console.log(`[SENTRY] Found existing company: ${ticker} with ID: ${existing.id}`);
-    return existing.id;
-  }
-
-  console.log(`[SENTRY] Company ${ticker} not found, error:`, findError);
-
-  // If not found, try to create it
-  console.log(`[SENTRY] Creating new company record for ${ticker}`);
-  
-  const companyData = {
-    ticker: ticker.toUpperCase(),
-    cik: cik,
-    name: `${ticker.toUpperCase()} Corp`,
-    last_updated: new Date().toISOString()
-  };
-
-  const { data: newCompany, error: createError } = await supabase
-    .from('bdc_companies')
-    .insert(companyData)
-    .select('id')
-    .single();
-
-  if (createError) {
-    console.error(`[SENTRY] Failed to create company ${ticker}:`, createError);
-    console.error(`[SENTRY] Create error details:`, JSON.stringify(createError, null, 2));
+    console.log(`[SENTRY] Company ${ticker} not found, creating new record`);
     
-    // Fallback: return a generated ID if table creation fails
+    // Create new company
+    const companyData = {
+      ticker: ticker.toUpperCase(),
+      cik: cik,
+      name: `${ticker.toUpperCase()} Corp`,
+      last_updated: new Date().toISOString()
+    };
+
+    const { data: newCompany, error: createError } = await supabase
+      .from('bdc_companies')
+      .insert(companyData)
+      .select('id')
+      .single();
+
+    if (createError) {
+      console.error(`[SENTRY] Failed to create company ${ticker}:`, createError);
+      console.error(`[SENTRY] Create error details:`, JSON.stringify(createError, null, 2));
+      
+      // Use fallback ID
+      const fallbackId = `${ticker.toLowerCase()}_${cik}`;
+      console.log(`[SENTRY] Using fallback company ID: ${fallbackId}`);
+      return fallbackId;
+    }
+
+    console.log(`[SENTRY] Created new company: ${ticker} with ID: ${newCompany.id}`);
+    return newCompany.id;
+    
+  } catch (error) {
+    console.error(`[SENTRY] Error in ensureBDCCompany:`, error);
+    
+    // Use fallback ID on any error
     const fallbackId = `${ticker.toLowerCase()}_${cik}`;
-    console.log(`[SENTRY] Using fallback company ID: ${fallbackId}`);
+    console.log(`[SENTRY] Using fallback company ID due to error: ${fallbackId}`);
     return fallbackId;
   }
-
-  console.log(`[SENTRY] Created new company: ${ticker} with ID: ${newCompany.id}`);
-  return newCompany.id;
 }
 
 // Main handler function
@@ -500,9 +482,6 @@ serve(async (req) => {
           throw new Error('ticker and cik are required for extract_filing action');
         }
 
-        // Ensure company exists in database
-        await ensureBDCCompany(supabase, ticker, cik);
-        
         const investments = await extractor.extractBDCInvestments(cik, ticker, supabase)
         await saveInvestmentsToDatabase(supabase, investments)
 
@@ -527,9 +506,6 @@ serve(async (req) => {
           throw new Error('ticker and cik are required for backfill_ticker action');
         }
 
-        // Ensure company exists in database
-        await ensureBDCCompany(supabase, ticker, cik);
-        
         const investments = await extractor.extractBDCInvestments(cik, ticker, supabase)
         await saveInvestmentsToDatabase(supabase, investments)
 
@@ -566,9 +542,6 @@ serve(async (req) => {
         for (const bdc of defaultBDCs) {
           try {
             console.log(`[SENTRY] Processing ${bdc.ticker}...`)
-            
-            // Ensure company exists in database
-            await ensureBDCCompany(supabase, bdc.ticker, bdc.cik);
             
             const investments = await extractor.extractBDCInvestments(bdc.cik, bdc.ticker, supabase)
             await saveInvestmentsToDatabase(supabase, investments)
