@@ -1,5 +1,5 @@
 // File: supabase/functions/sec-extractor/index.ts
-// Updated SEC extractor with improved database operations and error handling
+// Updated SEC extractor with SEC-compliant User-Agent and improved error handling
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
@@ -69,14 +69,15 @@ interface Investment {
 class SECAPIExtractor {
   private readonly baseURL = 'https://data.sec.gov/api';
   private readonly headers = {
-    'User-Agent': 'BDC-Portfolio-Tracker github.com/tjbakshi/bdch-folio-tracker tj.bakshi@gmail.com',
+    'User-Agent': 'BDC Portfolio Tracker tj.bakshi@gmail.com',
     'Accept': 'application/json',
-    'Accept-Encoding': 'gzip, deflate'
+    'Accept-Encoding': 'gzip, deflate',
+    'From': 'tj.bakshi@gmail.com'
   };
 
-  // Rate limiting: SEC allows max 10 requests per second
+  // Rate limiting: SEC allows max 10 requests per second, using conservative 5 req/sec
   private lastRequestTime = 0;
-  private readonly minRequestInterval = 100; // 100ms = 10 requests/second
+  private readonly minRequestInterval = 200; // 200ms = 5 requests/second
 
   private async makeRequest(url: string): Promise<any> {
     // Implement rate limiting
@@ -93,10 +94,16 @@ class SECAPIExtractor {
     
     if (!response.ok) {
       const errorText = await response.text();
-      console.error(`[SENTRY] SEC API error: ${response.status} ${response.statusText} - ${errorText}`);
+      console.error(`[SENTRY] SEC API error: ${response.status} ${response.statusText}`);
       
       if (response.status === 403) {
-        throw new Error(`SEC API 403 Forbidden - Check User-Agent header. Response: ${errorText}`);
+        console.error(`[SENTRY] 403 Forbidden - User-Agent or rate limit issue`);
+        throw new Error(`SEC API 403 Forbidden - Please wait and try again later`);
+      }
+      
+      if (response.status === 429) {
+        console.error(`[SENTRY] 429 Too Many Requests - Rate limited`);
+        throw new Error(`SEC API rate limited - Please wait and try again`);
       }
       
       throw new Error(`SEC API error: ${response.status} ${response.statusText}`);
@@ -556,7 +563,7 @@ serve(async (req) => {
             totalInvestments += investments.length
             
             // Rate limiting between BDCs
-            await new Promise(resolve => setTimeout(resolve, 500))
+            await new Promise(resolve => setTimeout(resolve, 1000))
             
           } catch (error) {
             console.error(`[SENTRY] Failed to process ${bdc.ticker}:`, error)
