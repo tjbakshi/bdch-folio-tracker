@@ -1,0 +1,6 @@
+{
+  "imports": {
+    "deno_dom": "https://deno.land/x/deno_dom@v0.1.43/deno-dom-wasm.ts",
+    "cheerio": "https://esm.sh/cheerio@1.0.0-rc.12"
+  }
+}
