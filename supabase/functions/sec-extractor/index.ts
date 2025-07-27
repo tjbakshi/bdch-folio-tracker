@@ -1,56 +1,28 @@
 // File: supabase/functions/sec-extractor/index.ts
-// SEC extractor with proper error handling and BDC universe integration
+// COMPLETE REPLACEMENT - HTML Schedule of Investments Parser
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { DOMParser } from "https://deno.land/x/deno_dom@v0.1.38/deno-dom-wasm.ts"
 
-// Types for SEC API responses
-interface SECCompanyFacts {
-  cik: string;
-  entityName: string;
-  facts: {
-    'us-gaap': Record<string, any>;
-    dei: Record<string, any>;
-    [taxonomy: string]: Record<string, any>;
-  };
-}
-
-interface SECSubmission {
-  cik: string;
-  entityType: string;
-  sic: string;
-  sicDescription: string;
-  name: string;
-  tickers: string[];
-  exchanges: string[];
-  filings: {
-    recent: {
-      accessionNumber: string[];
-      filingDate: string[];
-      reportDate: string[];
-      acceptanceDateTime: string[];
-      form: string[];
-      fileNumber: string[];
-      filmNumber: string[];
-      items: string[];
-      size: number[];
-      isXBRL: number[];
-      isInlineXBRL: number[];
-      primaryDocument: string[];
-      primaryDocDescription: string[];
-    };
-  };
-}
-
-interface Investment {
+// Types for Schedule of Investments data
+interface PortfolioInvestment {
   company_id: string;
   raw_id: string;
   portfolio_company: string;
-  investment_type: string;
+  business_description?: string;
   industry?: string;
-  fair_value: number;
-  cost_basis?: number;
+  investment_type: string;
+  coupon?: string;
+  reference_rate?: string;
+  spread?: string;
+  acquisition_date?: string;
+  maturity_date?: string;
   shares_units?: number;
+  principal?: number;
+  amortized_cost?: number;
+  fair_value: number;
+  percentage_of_net_assets?: number;
   reporting_date: string;
   filing_date: string;
   form_type: string;
@@ -58,11 +30,7 @@ interface Investment {
   fiscal_year: number;
   fiscal_period: string;
   non_accrual: boolean;
-  pik_income?: number;
-  cash_income?: number;
-  total_income?: number;
-  extraction_method?: string;
-  xbrl_concept?: string;
+  extraction_method: string;
   footnotes?: string;
 }
 
@@ -76,20 +44,30 @@ interface BDCRecord {
   fiscal_year_end_day: number;
 }
 
-class SECAPIExtractor {
-  private readonly baseURL = 'https://data.sec.gov/api';
+interface SECFiling {
+  accessionNumber: string;
+  filingDate: string;
+  reportDate: string;
+  form: string;
+  primaryDocument: string;
+  size: number;
+}
+
+class ScheduleOfInvestmentsExtractor {
+  private readonly baseURL = 'https://www.sec.gov';
+  private readonly submissionsURL = 'https://data.sec.gov/submissions';
   private readonly headers = {
     'User-Agent': 'BDC Portfolio Tracker tj.bakshi@gmail.com',
-    'Accept': 'application/json',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     'Accept-Encoding': 'gzip, deflate',
     'From': 'tj.bakshi@gmail.com'
   };
 
-  // Rate limiting: SEC allows max 10 requests per second, using conservative 5 req/sec
+  // Rate limiting: SEC allows max 10 requests per second
   private lastRequestTime = 0;
   private readonly minRequestInterval = 200; // 200ms = 5 requests/second
 
-  private async makeRequest(url: string): Promise<any> {
+  private async makeRequest(url: string, isHtml = false): Promise<any> {
     // Implement rate limiting
     const now = Date.now();
     const timeSinceLastRequest = now - this.lastRequestTime;
@@ -98,380 +76,494 @@ class SECAPIExtractor {
     }
     this.lastRequestTime = Date.now();
 
-    console.log(`[SENTRY] Making SEC API request to: ${url}`);
+    console.log(`[SENTRY] Making SEC request to: ${url}`);
     
     const response = await fetch(url, { headers: this.headers });
     
     if (!response.ok) {
-      const errorText = await response.text();
       console.error(`[SENTRY] SEC API error: ${response.status} ${response.statusText}`);
       
       if (response.status === 403) {
-        console.error(`[SENTRY] 403 Forbidden - User-Agent or rate limit issue`);
         throw new Error(`SEC API 403 Forbidden - Please wait and try again later`);
       }
       
       if (response.status === 429) {
-        console.error(`[SENTRY] 429 Too Many Requests - Rate limited`);
         throw new Error(`SEC API rate limited - Please wait and try again`);
       }
       
       throw new Error(`SEC API error: ${response.status} ${response.statusText}`);
     }
     
-    return response.json();
+    if (isHtml) {
+      return response.text();
+    } else {
+      return response.json();
+    }
   }
 
-  async getCompanySubmissions(cik: string): Promise<SECSubmission> {
+  async getRecentFilings(cik: string): Promise<SECFiling[]> {
     const paddedCik = cik.padStart(10, '0');
-    const url = `${this.baseURL}/submissions/CIK${paddedCik}.json`;
-    return this.makeRequest(url);
+    const url = `${this.submissionsURL}/CIK${paddedCik}.json`;
+    
+    const submissionData = await this.makeRequest(url);
+    
+    if (!submissionData.filings?.recent) {
+      throw new Error('No recent filings found');
+    }
+    
+    const recent = submissionData.filings.recent;
+    const filings: SECFiling[] = [];
+    
+    // Get recent 10-K and 10-Q filings (last 2 years)
+    for (let i = 0; i < recent.form.length; i++) {
+      const form = recent.form[i];
+      const filingDate = recent.filingDate[i];
+      
+      // Only get 10-K and 10-Q filings from last 2 years
+      if ((form === '10-K' || form === '10-Q') && 
+          new Date(filingDate) > new Date('2022-01-01')) {
+        
+        filings.push({
+          accessionNumber: recent.accessionNumber[i],
+          filingDate: recent.filingDate[i],
+          reportDate: recent.reportDate[i] || recent.filingDate[i],
+          form: form,
+          primaryDocument: recent.primaryDocument[i],
+          size: recent.size[i]
+        });
+      }
+      
+      // Limit to most recent 10 filings to avoid overwhelming the system
+      if (filings.length >= 10) break;
+    }
+    
+    console.log(`[SENTRY] Found ${filings.length} recent 10-K/10-Q filings for CIK ${cik}`);
+    return filings;
   }
 
-  async getCompanyFacts(cik: string): Promise<SECCompanyFacts> {
-    const paddedCik = cik.padStart(10, '0');
-    const url = `${this.baseURL}/xbrl/companyfacts/CIK${paddedCik}.json`;
-    return this.makeRequest(url);
+  async downloadFilingHTML(filing: SECFiling): Promise<string> {
+    // Build the URL to the actual HTML filing
+    const accessionNumberForURL = filing.accessionNumber.replace(/-/g, '');
+    const filingURL = `${this.baseURL}/Archives/edgar/data/${parseInt(filing.accessionNumber.split('-')[0])}/${filing.accessionNumber}/${filing.primaryDocument}`;
+    
+    console.log(`[SENTRY] Downloading filing: ${filingURL}`);
+    
+    try {
+      const htmlContent = await this.makeRequest(filingURL, true);
+      return htmlContent;
+    } catch (error) {
+      console.error(`[SENTRY] Failed to download filing ${filing.accessionNumber}:`, error);
+      throw error;
+    }
   }
 
-  async getCompanyConcept(cik: string, taxonomy: string, concept: string): Promise<any> {
-    const paddedCik = cik.padStart(10, '0');
-    const url = `${this.baseURL}/xbrl/companyconcept/CIK${paddedCik}/${taxonomy}/${concept}.json`;
-    return this.makeRequest(url);
+  parseScheduleOfInvestments(htmlContent: string, filing: SECFiling, ticker: string, companyId: string): PortfolioInvestment[] {
+    console.log(`[SENTRY] Parsing Schedule of Investments from ${filing.form} filing`);
+    
+    try {
+      const doc = new DOMParser().parseFromString(htmlContent, 'text/html');
+      if (!doc) {
+        throw new Error('Failed to parse HTML document');
+      }
+
+      const investments: PortfolioInvestment[] = [];
+      
+      // Look for Schedule of Investments tables
+      const tables = doc.querySelectorAll('table');
+      console.log(`[SENTRY] Found ${tables.length} tables in filing`);
+
+      for (const table of tables) {
+        // Find tables that look like Schedule of Investments
+        const tableText = table.textContent?.toLowerCase() || '';
+        
+        if (this.isScheduleOfInvestmentsTable(tableText)) {
+          console.log(`[SENTRY] Found potential Schedule of Investments table`);
+          
+          const tableInvestments = this.parseInvestmentTable(
+            table, 
+            filing, 
+            ticker, 
+            companyId
+          );
+          
+          investments.push(...tableInvestments);
+        }
+      }
+
+      console.log(`[SENTRY] Extracted ${investments.length} investments from ${filing.form}`);
+      return investments;
+
+    } catch (error) {
+      console.error(`[SENTRY] Error parsing Schedule of Investments:`, error);
+      return [];
+    }
   }
 
-  /**
-   * Extract BDC investments using SEC's structured data APIs
-   */
-  async extractBDCInvestments(cik: string, ticker: string, supabase: any): Promise<Investment[]> {
-    console.log(`[SENTRY] Starting BDC extraction for ${ticker} (CIK: ${cik})`);
+  private isScheduleOfInvestmentsTable(tableText: string): boolean {
+    // Look for key indicators that this is a Schedule of Investments table
+    const indicators = [
+      'schedule of investments',
+      'consolidated schedule of investments',
+      'portfolio company',
+      'fair value',
+      'principal',
+      'maturity date',
+      'acquisition date',
+      'coupon',
+      'business description'
+    ];
+
+    const matchCount = indicators.filter(indicator => 
+      tableText.includes(indicator)
+    ).length;
+
+    // If we find at least 4 indicators, it's likely a Schedule of Investments
+    return matchCount >= 4;
+  }
+
+  private parseInvestmentTable(table: Element, filing: SECFiling, ticker: string, companyId: string): PortfolioInvestment[] {
+    const investments: PortfolioInvestment[] = [];
+    
+    try {
+      const rows = table.querySelectorAll('tr');
+      console.log(`[SENTRY] Processing ${rows.length} table rows`);
+
+      let headerRow: Element | null = null;
+      let columnMappings: Record<string, number> = {};
+
+      // Find header row and map columns
+      for (const row of rows) {
+        const cells = row.querySelectorAll('th, td');
+        const rowText = row.textContent?.toLowerCase() || '';
+
+        if (this.isHeaderRow(rowText)) {
+          headerRow = row;
+          columnMappings = this.mapColumns(cells);
+          console.log(`[SENTRY] Found header row with columns:`, Object.keys(columnMappings));
+          break;
+        }
+      }
+
+      if (!headerRow || Object.keys(columnMappings).length === 0) {
+        console.log(`[SENTRY] No suitable header row found in table`);
+        return investments;
+      }
+
+      // Process data rows
+      let isDataSection = false;
+      let investmentCount = 0;
+
+      for (const row of rows) {
+        // Skip until we're past the header
+        if (row === headerRow) {
+          isDataSection = true;
+          continue;
+        }
+
+        if (!isDataSection) continue;
+
+        const cells = row.querySelectorAll('td');
+        if (cells.length < 3) continue; // Skip rows with too few cells
+
+        const investment = this.parseInvestmentRow(
+          cells, 
+          columnMappings, 
+          filing, 
+          ticker, 
+          companyId,
+          investmentCount
+        );
+
+        if (investment) {
+          investments.push(investment);
+          investmentCount++;
+        }
+
+        // Limit to prevent runaway parsing
+        if (investmentCount >= 500) {
+          console.log(`[SENTRY] Reached maximum investment limit (500) for this filing`);
+          break;
+        }
+      }
+
+      console.log(`[SENTRY] Successfully parsed ${investments.length} investments from table`);
+      return investments;
+
+    } catch (error) {
+      console.error(`[SENTRY] Error parsing investment table:`, error);
+      return investments;
+    }
+  }
+
+  private isHeaderRow(rowText: string): boolean {
+    const headerIndicators = [
+      'company',
+      'portfolio company', 
+      'business description',
+      'investment',
+      'fair value',
+      'principal',
+      'maturity',
+      'coupon'
+    ];
+
+    const matchCount = headerIndicators.filter(indicator => 
+      rowText.includes(indicator)
+    ).length;
+
+    return matchCount >= 3;
+  }
+
+  private mapColumns(cells: NodeListOf<Element>): Record<string, number> {
+    const mappings: Record<string, number> = {};
+    
+    for (let i = 0; i < cells.length; i++) {
+      const cellText = cells[i].textContent?.toLowerCase().trim() || '';
+      
+      // Map common column patterns
+      if (cellText.includes('company') || cellText.includes('issuer')) {
+        mappings['company'] = i;
+      } else if (cellText.includes('business description') || cellText.includes('description')) {
+        mappings['business_description'] = i;
+      } else if (cellText.includes('industry')) {
+        mappings['industry'] = i;
+      } else if (cellText.includes('investment') && cellText.includes('type')) {
+        mappings['investment_type'] = i;
+      } else if (cellText.includes('investment') && !cellText.includes('type')) {
+        mappings['investment'] = i;
+      } else if (cellText.includes('coupon')) {
+        mappings['coupon'] = i;
+      } else if (cellText.includes('reference')) {
+        mappings['reference'] = i;
+      } else if (cellText.includes('spread')) {
+        mappings['spread'] = i;
+      } else if (cellText.includes('acquisition') && cellText.includes('date')) {
+        mappings['acquisition_date'] = i;
+      } else if (cellText.includes('maturity') && cellText.includes('date')) {
+        mappings['maturity_date'] = i;
+      } else if (cellText.includes('shares') || cellText.includes('units')) {
+        mappings['shares_units'] = i;
+      } else if (cellText.includes('principal')) {
+        mappings['principal'] = i;
+      } else if (cellText.includes('amortized') && cellText.includes('cost')) {
+        mappings['amortized_cost'] = i;
+      } else if (cellText.includes('fair') && cellText.includes('value')) {
+        mappings['fair_value'] = i;
+      } else if (cellText.includes('%') && cellText.includes('net')) {
+        mappings['percentage'] = i;
+      }
+    }
+    
+    return mappings;
+  }
+
+  private parseInvestmentRow(
+    cells: NodeListOf<Element>, 
+    mappings: Record<string, number>, 
+    filing: SECFiling, 
+    ticker: string, 
+    companyId: string,
+    index: number
+  ): PortfolioInvestment | null {
+    
+    try {
+      // Get company name (required)
+      const companyName = this.getCellValue(cells, mappings['company']) || 
+                         this.getCellValue(cells, mappings['investment']) ||
+                         `Investment ${index + 1}`;
+
+      if (!companyName || companyName.length < 2) {
+        return null; // Skip rows without meaningful company names
+      }
+
+      // Get fair value (required)
+      const fairValueText = this.getCellValue(cells, mappings['fair_value']);
+      const fairValue = this.parseNumber(fairValueText);
+
+      if (!fairValue || fairValue <= 0) {
+        return null; // Skip investments without valid fair value
+      }
+
+      // Generate unique ID
+      const rawId = `${ticker}_${filing.accessionNumber}_${companyName.replace(/[^a-zA-Z0-9]/g, '_')}_${index}`;
+
+      const investment: PortfolioInvestment = {
+        company_id: companyId,
+        raw_id: rawId,
+        portfolio_company: companyName,
+        business_description: this.getCellValue(cells, mappings['business_description']),
+        industry: this.getCellValue(cells, mappings['industry']),
+        investment_type: this.getCellValue(cells, mappings['investment_type']) || 
+                        this.getCellValue(cells, mappings['investment']) || 'Unknown',
+        coupon: this.getCellValue(cells, mappings['coupon']),
+        reference_rate: this.getCellValue(cells, mappings['reference']),
+        spread: this.getCellValue(cells, mappings['spread']),
+        acquisition_date: this.parseDate(this.getCellValue(cells, mappings['acquisition_date'])),
+        maturity_date: this.parseDate(this.getCellValue(cells, mappings['maturity_date'])),
+        shares_units: this.parseNumber(this.getCellValue(cells, mappings['shares_units'])),
+        principal: this.parseNumber(this.getCellValue(cells, mappings['principal'])),
+        amortized_cost: this.parseNumber(this.getCellValue(cells, mappings['amortized_cost'])),
+        fair_value: fairValue,
+        percentage_of_net_assets: this.parsePercentage(this.getCellValue(cells, mappings['percentage'])),
+        reporting_date: filing.reportDate,
+        filing_date: filing.filingDate,
+        form_type: filing.form,
+        accession_number: filing.accessionNumber,
+        fiscal_year: new Date(filing.filingDate).getFullYear(),
+        fiscal_period: filing.form === '10-K' ? 'FY' : 'Q' + Math.ceil((new Date(filing.reportDate).getMonth() + 1) / 3),
+        non_accrual: this.isNonAccrual(companyName, this.getCellValue(cells, mappings['investment_type']) || ''),
+        extraction_method: 'HTML_PARSING',
+        footnotes: `Extracted from ${filing.form} filed ${filing.filingDate}`
+      };
+
+      return investment;
+
+    } catch (error) {
+      console.error(`[SENTRY] Error parsing investment row:`, error);
+      return null;
+    }
+  }
+
+  private getCellValue(cells: NodeListOf<Element>, columnIndex?: number): string | undefined {
+    if (columnIndex === undefined || columnIndex >= cells.length) {
+      return undefined;
+    }
+    
+    const cellText = cells[columnIndex].textContent?.trim();
+    return cellText && cellText !== '—' && cellText !== '-' ? cellText : undefined;
+  }
+
+  private parseNumber(text?: string): number | undefined {
+    if (!text) return undefined;
+    
+    // Remove common formatting (commas, parentheses, dollar signs)
+    const cleanText = text.replace(/[$,()]/g, '').trim();
+    const number = parseFloat(cleanText);
+    
+    return isNaN(number) ? undefined : number;
+  }
+
+  private parsePercentage(text?: string): number | undefined {
+    if (!text) return undefined;
+    
+    const cleanText = text.replace(/[%()]/g, '').trim();
+    const number = parseFloat(cleanText);
+    
+    return isNaN(number) ? undefined : number;
+  }
+
+  private parseDate(text?: string): string | undefined {
+    if (!text) return undefined;
+    
+    try {
+      // Try to parse various date formats
+      const date = new Date(text);
+      if (isNaN(date.getTime())) return undefined;
+      
+      return date.toISOString().split('T')[0]; // Return YYYY-MM-DD format
+    } catch {
+      return undefined;
+    }
+  }
+
+  private isNonAccrual(companyName: string, investmentType: string): boolean {
+    const text = `${companyName} ${investmentType}`.toLowerCase();
+    return text.includes('non-accrual') || text.includes('nonaccrual');
+  }
+
+  async extractBDCInvestments(cik: string, ticker: string, supabase: any): Promise<PortfolioInvestment[]> {
+    console.log(`[SENTRY] Starting Schedule of Investments extraction for ${ticker} (CIK: ${cik})`);
     
     try {
       // Get or create company ID
       const companyId = await ensureBDCCompany(supabase, ticker, cik);
-      console.log(`[SENTRY] Using company ID: ${companyId} for ${ticker}`);
-
-      // Get company facts (contains all XBRL data)
-      const facts = await this.getCompanyFacts(cik);
-      console.log(`[SENTRY] Retrieved facts for ${facts.entityName}`);
-
-      // Try to get recent filings info - but don't fail if this doesn't work
-      let submissions: SECSubmission | null = null;
-      try {
-        submissions = await this.getCompanySubmissions(cik);
-        console.log(`[SENTRY] Found ${submissions.filings.recent.form.length} recent filings`);
-      } catch (submissionError) {
-        console.log(`[SENTRY] Could not retrieve submissions (continuing without filing details): ${submissionError.message}`);
-        // Create a minimal submissions object to avoid breaking the extraction
-        submissions = {
-          cik: cik,
-          entityType: '',
-          sic: '',
-          sicDescription: '',
-          name: facts.entityName || ticker,
-          tickers: [ticker],
-          exchanges: [],
-          filings: {
-            recent: {
-              accessionNumber: [],
-              filingDate: [],
-              reportDate: [],
-              acceptanceDateTime: [],
-              form: [],
-              fileNumber: [],
-              filmNumber: [],
-              items: [],
-              size: [],
-              isXBRL: [],
-              isInlineXBRL: [],
-              primaryDocument: [],
-              primaryDocDescription: []
-            }
-          }
-        };
+      
+      // Get recent filings
+      const filings = await this.getRecentFilings(cik);
+      
+      if (filings.length === 0) {
+        console.log(`[SENTRY] No recent 10-K/10-Q filings found for ${ticker}`);
+        return [];
       }
 
-      // Extract investments from XBRL facts
-      const investments = await this.extractInvestmentsFromFacts(facts, submissions, ticker, companyId);
-      
-      console.log(`[SENTRY] Extracted ${investments.length} investments from ${ticker}`);
-      return investments;
+      const allInvestments: PortfolioInvestment[] = [];
+
+      // Process each filing (most recent first)
+      for (const filing of filings.slice(0, 4)) { // Limit to 4 most recent filings
+        try {
+          console.log(`[SENTRY] Processing ${filing.form} filed ${filing.filingDate} for ${ticker}`);
+          
+          // Download HTML content
+          const htmlContent = await this.downloadFilingHTML(filing);
+          
+          // Parse Schedule of Investments
+          const investments = this.parseScheduleOfInvestments(htmlContent, filing, ticker, companyId);
+          
+          allInvestments.push(...investments);
+          
+          console.log(`[SENTRY] Extracted ${investments.length} investments from ${filing.form}`);
+          
+          // Rate limiting between filings
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+        } catch (error) {
+          console.error(`[SENTRY] Error processing filing ${filing.accessionNumber}:`, error);
+          // Continue with next filing
+        }
+      }
+
+      console.log(`[SENTRY] Total investments extracted for ${ticker}: ${allInvestments.length}`);
+      return allInvestments;
 
     } catch (error) {
       console.error(`[SENTRY] Error extracting BDC investments for ${ticker}:`, error);
       throw error;
     }
   }
-
-  private async extractInvestmentsFromFacts(
-    facts: SECCompanyFacts, 
-    submissions: SECSubmission, 
-    ticker: string,
-    companyId: string
-  ): Promise<Investment[]> {
-    const investments: Investment[] = [];
-    const usGaap = facts.facts['us-gaap'] || {};
-    
-    console.log(`[SENTRY] Available US-GAAP concepts: ${Object.keys(usGaap).length}`);
-    
-    // Log all available concepts for debugging
-    const allConcepts = Object.keys(usGaap);
-    console.log(`[SENTRY] First 20 available concepts:`, allConcepts.slice(0, 20).join(', '));
-    console.log(`[SENTRY] Investment-related concepts found:`, allConcepts.filter(c => 
-      c.toLowerCase().includes('investment') || 
-      c.toLowerCase().includes('schedule') ||
-      c.toLowerCase().includes('portfolio') ||
-      c.toLowerCase().includes('security') ||
-      c.toLowerCase().includes('debt') ||
-      c.toLowerCase().includes('equity')
-    ));
-
-    // Broader search for BDC investment concepts (including GBDC-specific ones)
-    const investmentConcepts = [
-      // Standard BDC concepts
-      'ScheduleOfInvestmentsInAndAdvancesToAffiliatesAtFairValue',
-      'ScheduleOfInvestmentsUnaffiliatedIssuersAtFairValue', 
-      'InvestmentsFairValueDisclosure',
-      'InvestmentsAtFairValue',
-      'InvestmentCompaniesInvestments',
-      'ScheduleOfInvestmentsInSecuritiesOwned',
-      'ScheduleOfPortfolioInvestments',
-      
-      // Securities concepts
-      'AvailableForSaleSecuritiesFairValue',
-      'DebtSecuritiesFairValue',
-      'EquitySecuritiesFairValue',
-      'TradingSecuritiesFairValue',
-      'HeldToMaturitySecuritiesFairValue',
-      
-      // Alternative investment concepts
-      'Assets',
-      'Investments',
-      'InvestmentIncomeInterest',
-      'InvestmentIncomeDividend',
-      'LoansAndAdvancesAtFairValue',
-      'NotesReceivableNet',
-      'FinancialInstrumentsAtFairValue',
-      
-      // Look for any concept with key words
-      ...allConcepts.filter(concept => {
-        const lower = concept.toLowerCase();
-        return (lower.includes('investment') || lower.includes('security') || lower.includes('loan')) &&
-               (lower.includes('fair') || lower.includes('value') || lower.includes('amount'));
-      })
-    ];
-
-    // Look for investment concepts that actually exist
-    const availableConcepts = investmentConcepts.filter(concept => usGaap[concept]);
-    console.log(`[SENTRY] Found ${availableConcepts.length} available investment concepts: ${availableConcepts.join(', ')}`);
-
-    // Try to find investment data in various XBRL concepts
-    for (const concept of availableConcepts) {
-      console.log(`[SENTRY] Processing concept: ${concept}`);
-      const conceptData = usGaap[concept];
-      
-      // Extract investment details from each fact
-      if (conceptData.units) {
-        const units = Object.keys(conceptData.units);
-        console.log(`[SENTRY] Available units for ${concept}: ${units.join(', ')}`);
-        
-        // Process USD data if available
-        if (conceptData.units.USD) {
-          const factList = conceptData.units.USD;
-          console.log(`[SENTRY] Processing ${factList.length} USD facts for ${concept}`);
-          
-          for (const fact of factList) {
-            const investment = this.parseInvestmentFact(fact, submissions, ticker, facts.cik, concept, companyId);
-            if (investment) {
-              investments.push(investment);
-            }
-          }
-        }
-      }
-    }
-
-    // If no structured investment data found, try individual company concept calls
-    if (investments.length === 0) {
-      console.log(`[SENTRY] No investments found in company facts, trying individual concept calls`);
-      await this.tryIndividualConceptCalls(facts.cik, investments, ticker, submissions, companyId);
-    }
-
-    return investments;
-  }
-
-  private async tryIndividualConceptCalls(
-    cik: string, 
-    investments: Investment[], 
-    ticker: string, 
-    submissions: SECSubmission,
-    companyId: string
-  ): Promise<void> {
-    // Try specific Schedule of Investments concepts via individual API calls
-    const conceptsToTry = [
-      'InvestmentsFairValueDisclosure',
-      'ScheduleOfInvestmentsTableTextBlock',
-      'InvestmentCompaniesInvestments',
-      'AvailableForSaleSecuritiesFairValue'
-    ];
-
-    for (const concept of conceptsToTry) {
-      try {
-        console.log(`[SENTRY] Trying individual concept call: ${concept}`);
-        const conceptData = await this.getCompanyConcept(cik, 'us-gaap', concept);
-        
-        if (conceptData && conceptData.units && conceptData.units.USD) {
-          console.log(`[SENTRY] Found data for ${concept}: ${conceptData.units.USD.length} facts`);
-          this.processConceptData(conceptData, investments, ticker, submissions, concept, companyId);
-        }
-      } catch (error) {
-        console.log(`[SENTRY] Concept ${concept} not available: ${error.message}`);
-      }
-    }
-  }
-
-  private parseInvestmentFact(
-    fact: any, 
-    submissions: SECSubmission, 
-    ticker: string, 
-    cik: string,
-    concept: string,
-    companyId: string
-  ): Investment | null {
-    try {
-      const fairValue = parseFloat(fact.val) || 0;
-      
-      // For debugging, accept smaller values initially
-      if (fairValue < 100) {
-        return null;
-      }
-
-      // Try to find the corresponding filing info
-      const accessionNumber = fact.accn;
-      let filingIndex = -1;
-      let formType = 'Unknown';
-      let filingDate = fact.filed || '2024-01-01';
-      
-      if (submissions && submissions.filings.recent.accessionNumber.length > 0) {
-        filingIndex = submissions.filings.recent.accessionNumber.indexOf(accessionNumber);
-        
-        if (filingIndex !== -1) {
-          formType = submissions.filings.recent.form[filingIndex];
-          filingDate = submissions.filings.recent.filingDate[filingIndex];
-        }
-      }
-      
-      // Use fact data if available, otherwise use defaults
-      const reportDate = fact.end || filingDate;
-
-      // Generate unique raw_id
-      const rawId = `${ticker}_${concept}_${accessionNumber || 'unknown'}_${reportDate}_${fairValue}`;
-
-      console.log(`[SENTRY] Creating investment: ${this.extractIssuerName(fact, concept)} - ${fairValue.toLocaleString()}`);
-
-      const investment: Investment = {
-        company_id: companyId,
-        raw_id: rawId,
-        portfolio_company: this.extractIssuerName(fact, concept),
-        investment_type: this.determineInvestmentType(fact, concept),
-        fair_value: fairValue,
-        reporting_date: reportDate,
-        filing_date: filingDate,
-        form_type: formType,
-        accession_number: accessionNumber || 'unknown',
-        fiscal_year: fact.fy || new Date(filingDate).getFullYear(),
-        fiscal_period: fact.fp || 'FY',
-        non_accrual: false, // Default, would need additional logic to determine
-        extraction_method: 'SEC_API',
-        xbrl_concept: concept
-      };
-
-      // Add additional context if available
-      if (fact.start && fact.end) {
-        investment.footnotes = `Period: ${fact.start} to ${fact.end}`;
-      }
-
-      // Add form type to footnotes
-      investment.footnotes = (investment.footnotes || '') + ` | Form: ${formType} | Concept: ${concept}`;
-
-      return investment;
-    } catch (error) {
-      console.error('[SENTRY] Error parsing investment fact:', error);
-      return null;
-    }
-  }
-
-  private extractIssuerName(fact: any, concept: string): string {
-    // Try to extract issuer name from various fact properties
-    if (fact.frame) return fact.frame;
-    if (fact.fp && fact.fp !== 'FY') return `${fact.fp} Investment`;
-    if (concept.includes('Affiliate')) return 'Affiliated Investment';
-    
-    // Generate name based on concept
-    let name = concept.replace(/([A-Z])/g, ' $1').trim();
-    name = name.replace(/^Schedule Of/, '').replace(/At Fair Value$/, '').trim();
-    
-    return name || 'Investment Holding';
-  }
-
-  private processConceptData(
-    conceptData: any, 
-    investments: Investment[], 
-    ticker: string, 
-    submissions: SECSubmission,
-    concept: string,
-    companyId: string
-  ): void {
-    if (conceptData.units && conceptData.units.USD) {
-      for (const fact of conceptData.units.USD) {
-        const investment = this.parseInvestmentFact(fact, submissions, ticker, conceptData.cik, concept, companyId);
-        if (investment) {
-          investments.push(investment);
-        }
-      }
-    }
-  }
-
-  private determineInvestmentType(fact: any, concept: string): string {
-    // Determine investment type based on XBRL concept and context
-    const conceptLower = concept.toLowerCase();
-    
-    if (conceptLower.includes('debt') || conceptLower.includes('loan')) return 'Debt';
-    if (conceptLower.includes('equity') || conceptLower.includes('stock')) return 'Equity';
-    if (conceptLower.includes('bond')) return 'Bond';
-    if (conceptLower.includes('affiliate')) return 'Affiliated';
-    if (conceptLower.includes('warrant')) return 'Warrant';
-    
-    return 'Other';
-  }
 }
 
 // Database operations
-async function saveInvestmentsToDatabase(supabase: any, investments: Investment[]): Promise<void> {
+async function saveInvestmentsToDatabase(supabase: any, investments: PortfolioInvestment[]): Promise<void> {
   if (investments.length === 0) {
     console.log('[SENTRY] No investments to save');
     return;
   }
 
-  console.log(`[SENTRY] Saving ${investments.length} investments to database`);
+  console.log(`[SENTRY] Saving ${investments.length} portfolio investments to database`);
 
   try {
-    const { data, error } = await supabase
-      .from('bdc_investments')
-      .upsert(investments, {
-        onConflict: 'raw_id',
-        ignoreDuplicates: false
-      });
+    // Clear existing data for this company first
+    if (investments.length > 0) {
+      const companyId = investments[0].company_id;
+      const { error: deleteError } = await supabase
+        .from('portfolio_investments')
+        .delete()
+        .eq('company_id', companyId);
 
-    if (error) {
-      console.error('[SENTRY] Database upsert error:', error);
-      console.log(`[SENTRY] Failed to save to database, but extracted ${investments.length} investments successfully`);
-      return;
+      if (deleteError) {
+        console.error('[SENTRY] Error clearing existing data:', deleteError);
+      }
     }
 
-    console.log(`[SENTRY] Successfully saved ${investments.length} investments`);
+    // Insert new data in batches
+    const batchSize = 100;
+    for (let i = 0; i < investments.length; i += batchSize) {
+      const batch = investments.slice(i, i + batchSize);
+      
+      const { error } = await supabase
+        .from('portfolio_investments')
+        .insert(batch);
+
+      if (error) {
+        console.error(`[SENTRY] Database insert error for batch ${i}:`, error);
+      } else {
+        console.log(`[SENTRY] Saved batch ${i + 1}-${Math.min(i + batchSize, investments.length)}`);
+      }
+    }
+
+    console.log(`[SENTRY] Successfully saved ${investments.length} portfolio investments`);
   } catch (error) {
     console.error('[SENTRY] Database save error:', error);
-    console.log(`[SENTRY] Failed to save to database, but extracted ${investments.length} investments successfully`);
   }
 }
 
@@ -591,8 +683,9 @@ serve(async (req) => {
       return new Response(
         JSON.stringify({
           success: true,
-          message: 'SEC Extractor is running. Supported actions: extract_filing, backfill_ticker, backfill_all, incremental_check',
-          available_actions: ['extract_filing', 'backfill_ticker', 'backfill_all', 'incremental_check']
+          message: 'SEC Extractor (HTML Parser) is running. Supported actions: extract_filing, backfill_ticker, backfill_all, incremental_check',
+          available_actions: ['extract_filing', 'backfill_ticker', 'backfill_all', 'incremental_check'],
+          extraction_method: 'HTML_SCHEDULE_OF_INVESTMENTS'
         }),
         {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -600,11 +693,11 @@ serve(async (req) => {
       )
     }
 
-    const extractor = new SECAPIExtractor()
+    const extractor = new ScheduleOfInvestmentsExtractor()
 
     switch (action) {
       case 'extract_filing': {
-        console.log(`[SENTRY] Extracting single BDC: ${ticker} (${cik})`)
+        console.log(`[SENTRY] Extracting Schedule of Investments for: ${ticker} (${cik})`)
         
         if (!ticker || !cik) {
           throw new Error('ticker and cik are required for extract_filing action');
@@ -619,7 +712,8 @@ serve(async (req) => {
             ticker,
             cik,
             investmentsFound: investments.length,
-            message: `Successfully processed ${ticker}: ${investments.length} investments found`
+            message: `Successfully processed ${ticker}: ${investments.length} portfolio investments found`,
+            extraction_method: 'HTML_SCHEDULE_OF_INVESTMENTS'
           }),
           {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -628,7 +722,7 @@ serve(async (req) => {
       }
 
       case 'backfill_ticker': {
-        console.log(`[SENTRY] Backfilling ticker: ${ticker}`)
+        console.log(`[SENTRY] Backfilling Schedule of Investments for ticker: ${ticker}`)
         
         if (!ticker) {
           throw new Error('ticker is required for backfill_ticker action');
@@ -664,7 +758,8 @@ serve(async (req) => {
             ticker,
             cik: targetCik,
             investmentsFound: investments.length,
-            message: `Backfill completed for ${ticker}: ${investments.length} investments found`
+            message: `Schedule of Investments backfill completed for ${ticker}: ${investments.length} portfolio investments found`,
+            extraction_method: 'HTML_SCHEDULE_OF_INVESTMENTS'
           }),
           {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -673,24 +768,21 @@ serve(async (req) => {
       }
 
       case 'backfill_all': {
-        console.log('[SENTRY] Starting backfill for all BDCs from bdc_universe table')
+        console.log('[SENTRY] Starting Schedule of Investments backfill for all BDCs from bdc_universe table')
         
         let bdcsToProcess: BDCRecord[];
         
         try {
-          // Get BDCs from database instead of hardcoded list
+          // Get BDCs from database
           bdcsToProcess = await getBDCsFromDatabase(supabase);
         } catch (error) {
           console.error('[SENTRY] Failed to fetch BDCs from database, falling back to legacy list');
           
           // Fallback to hardcoded list if database fetch fails
           const defaultBDCs = bdcList || [
-            { cik: '1476765', ticker: 'GBDC' },
             { cik: '1287750', ticker: 'ARCC' },
-            { cik: '1552198', ticker: 'WHF' },
-            { cik: '1414932', ticker: 'TSLX' },
-            { cik: '1287032', ticker: 'PSEC' }, // Fixed PSEC CIK
-            { cik: '1423902', ticker: 'NMFC' },
+            { cik: '1476765', ticker: 'GBDC' },
+            { cik: '1287032', ticker: 'PSEC' }, // Corrected PSEC CIK
           ];
 
           bdcsToProcess = defaultBDCs.map(bdc => ({
@@ -707,7 +799,7 @@ serve(async (req) => {
         const results = []
         let totalInvestments = 0
 
-        console.log(`[SENTRY] Processing ${bdcsToProcess.length} BDCs from database`);
+        console.log(`[SENTRY] Processing Schedule of Investments for ${bdcsToProcess.length} BDCs from database`);
 
         for (const bdc of bdcsToProcess) {
           try {
@@ -724,10 +816,10 @@ serve(async (req) => {
             })
             
             totalInvestments += investments.length
-            console.log(`[SENTRY] ✅ ${bdc.ticker}: ${investments.length} investments extracted`)
+            console.log(`[SENTRY] ✅ ${bdc.ticker}: ${investments.length} portfolio investments extracted`)
             
             // Rate limiting between BDCs
-            await new Promise(resolve => setTimeout(resolve, 1000))
+            await new Promise(resolve => setTimeout(resolve, 2000)) // 2 seconds between BDCs
             
           } catch (error) {
             console.error(`[SENTRY] ❌ Failed to process ${bdc.ticker}:`, error)
@@ -742,7 +834,7 @@ serve(async (req) => {
         }
 
         const successfulExtractions = results.filter(r => r.success).length;
-        console.log(`[SENTRY] Backfill complete: ${successfulExtractions}/${bdcsToProcess.length} BDCs successful, ${totalInvestments} total investments`);
+        console.log(`[SENTRY] Schedule of Investments backfill complete: ${successfulExtractions}/${bdcsToProcess.length} BDCs successful, ${totalInvestments} total portfolio investments`);
 
         return new Response(
           JSON.stringify({
@@ -750,7 +842,8 @@ serve(async (req) => {
             processed: results.length,
             totalInvestments,
             results,
-            message: `Backfill completed: ${totalInvestments} total investments processed`
+            message: `Schedule of Investments backfill completed: ${totalInvestments} total portfolio investments processed`,
+            extraction_method: 'HTML_SCHEDULE_OF_INVESTMENTS'
           }),
           {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -759,12 +852,13 @@ serve(async (req) => {
       }
 
       case 'incremental_check': {
-        console.log('[SENTRY] Performing incremental check for new filings')
+        console.log('[SENTRY] Performing incremental check for new Schedule of Investments filings')
         
         return new Response(
           JSON.stringify({
             success: true,
-            message: 'Incremental check completed - feature coming soon'
+            message: 'Incremental Schedule of Investments check completed - feature coming soon',
+            extraction_method: 'HTML_SCHEDULE_OF_INVESTMENTS'
           }),
           {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -789,7 +883,8 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({
         error: error.message,
-        success: false
+        success: false,
+        extraction_method: 'HTML_SCHEDULE_OF_INVESTMENTS'
       }),
       {
         status: 500,
