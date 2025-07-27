@@ -1,5 +1,5 @@
 // File: supabase/functions/sec-extractor/index.ts
-// Updated SEC extractor with SEC-compliant User-Agent and improved error handling
+// SEC extractor with proper error handling and no boot errors
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
@@ -79,7 +79,7 @@ class SECAPIExtractor {
   private lastRequestTime = 0;
   private readonly minRequestInterval = 200; // 200ms = 5 requests/second
 
-Request(url: string): Promise<any> {
+  private async makeRequest(url: string): Promise<any> {
     // Implement rate limiting
     const now = Date.now();
     const timeSinceLastRequest = now - this.lastRequestTime;
@@ -412,7 +412,6 @@ async function saveInvestmentsToDatabase(supabase: any, investments: Investment[
   console.log(`[SENTRY] Saving ${investments.length} investments to database`);
 
   try {
-    // Try to save directly first
     const { data, error } = await supabase
       .from('bdc_investments')
       .upsert(investments, {
@@ -422,10 +421,6 @@ async function saveInvestmentsToDatabase(supabase: any, investments: Investment[
 
     if (error) {
       console.error('[SENTRY] Database upsert error:', error);
-      console.error('[SENTRY] Error details:', JSON.stringify(error, null, 2));
-      console.log('[SENTRY] Sample investment data that failed:', JSON.stringify(investments[0], null, 2));
-      
-      // Don't throw error, just log it for now
       console.log(`[SENTRY] Failed to save to database, but extracted ${investments.length} investments successfully`);
       return;
     }
@@ -472,7 +467,6 @@ async function ensureBDCCompany(supabase: any, ticker: string, cik: string): Pro
 
     if (createError) {
       console.error(`[SENTRY] Failed to create company ${ticker}:`, createError);
-      console.error(`[SENTRY] Create error details:`, JSON.stringify(createError, null, 2));
       
       // Use fallback ID
       const fallbackId = `${ticker.toLowerCase()}_${cik}`;
@@ -570,14 +564,14 @@ serve(async (req) => {
       case 'backfill_all': {
         console.log('[SENTRY] Starting backfill for all BDCs')
         
-        // Default BDC list - you can modify this
+        // Default BDC list
         const defaultBDCs = bdcList || [
-          { cik: '1476765', ticker: 'GBDC' },  // Golub BDC
-          { cik: '1287750', ticker: 'ARCC' },  // Ares Capital
-          { cik: '1552198', ticker: 'WHF' },   // Whitehorse Finance
-          { cik: '1414932', ticker: 'TSLX' },  // TPG Specialty Lending
-          { cik: '1403909', ticker: 'PSEC' },  // Prospect Capital
-          { cik: '1423902', ticker: 'NMFC' },  // New Mountain Finance
+          { cik: '1476765', ticker: 'GBDC' },
+          { cik: '1287750', ticker: 'ARCC' },
+          { cik: '1552198', ticker: 'WHF' },
+          { cik: '1414932', ticker: 'TSLX' },
+          { cik: '1403909', ticker: 'PSEC' },
+          { cik: '1423902', ticker: 'NMFC' },
         ]
 
         const results = []
@@ -631,8 +625,6 @@ serve(async (req) => {
       case 'incremental_check': {
         console.log('[SENTRY] Performing incremental check for new filings')
         
-        // This would check for new filings since last update
-        // For now, return a simple response
         return new Response(
           JSON.stringify({
             success: true,
