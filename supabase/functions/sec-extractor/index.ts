@@ -114,14 +114,14 @@ class ScheduleOfInvestmentsExtractor {
     const recent = submissionData.filings.recent;
     const filings: SECFiling[] = [];
     
-    // Get recent 10-K and 10-Q filings (last 2 years)
+    // Get recent 10-K and 10-Q filings (back to 2017)
     for (let i = 0; i < recent.form.length; i++) {
       const form = recent.form[i];
       const filingDate = recent.filingDate[i];
       
-      // Only get 10-K and 10-Q filings from last 2 years
+      // Only get 10-K and 10-Q filings from 2017 onwards
       if ((form === '10-K' || form === '10-Q') && 
-          new Date(filingDate) > new Date('2022-01-01')) {
+          new Date(filingDate) > new Date('2017-01-01')) {
         
         filings.push({
           accessionNumber: recent.accessionNumber[i],
@@ -133,11 +133,11 @@ class ScheduleOfInvestmentsExtractor {
         });
       }
       
-      // Limit to most recent 10 filings to avoid overwhelming the system
-      if (filings.length >= 10) break;
+      // Limit to most recent 30 filings to get good historical coverage back to 2017
+      if (filings.length >= 30) break;
     }
     
-    console.log(`[SENTRY] Found ${filings.length} recent 10-K/10-Q filings for CIK ${cik}`);
+    console.log(`[SENTRY] Found ${filings.length} 10-K/10-Q filings since 2017 for CIK ${cik}`);
     return filings;
   }
 
@@ -279,9 +279,9 @@ class ScheduleOfInvestmentsExtractor {
           investmentCount++;
         }
 
-        // Limit to prevent runaway parsing
-        if (investmentCount >= 500) {
-          console.log(`[SENTRY] Reached maximum investment limit (500) for this filing`);
+        // Limit to prevent runaway parsing - increased for historical data
+        if (investmentCount >= 1000) {
+          console.log(`[SENTRY] Reached maximum investment limit (1000) for this filing`);
           break;
         }
       }
@@ -488,8 +488,8 @@ class ScheduleOfInvestmentsExtractor {
 
       const allInvestments: PortfolioInvestment[] = [];
 
-      // Process each filing (most recent first)
-      for (const filing of filings.slice(0, 4)) { // Limit to 4 most recent filings
+      // Process each filing (most recent first) - increased to get more historical data
+      for (const filing of filings.slice(0, 12)) { // Process up to 12 filings for better historical coverage
         try {
           console.log(`[SENTRY] Processing ${filing.form} filed ${filing.filingDate} for ${ticker}`);
           
@@ -501,10 +501,10 @@ class ScheduleOfInvestmentsExtractor {
           
           allInvestments.push(...investments);
           
-          console.log(`[SENTRY] Extracted ${investments.length} investments from ${filing.form}`);
+          console.log(`[SENTRY] Extracted ${investments.length} investments from ${filing.form} (${filing.filingDate})`);
           
-          // Rate limiting between filings
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          // Rate limiting between filings - reduced since we're processing more filings
+          await new Promise(resolve => setTimeout(resolve, 800));
           
         } catch (error) {
           console.error(`[SENTRY] Error processing filing ${filing.accessionNumber}:`, error);
@@ -683,9 +683,10 @@ serve(async (req) => {
       return new Response(
         JSON.stringify({
           success: true,
-          message: 'SEC Extractor (HTML Parser) is running. Supported actions: extract_filing, backfill_ticker, backfill_all, incremental_check',
+          message: 'SEC Extractor (HTML Parser) is running. Extracts Schedule of Investments from 2017-2024. Supported actions: extract_filing, backfill_ticker, backfill_all, incremental_check',
           available_actions: ['extract_filing', 'backfill_ticker', 'backfill_all', 'incremental_check'],
-          extraction_method: 'HTML_SCHEDULE_OF_INVESTMENTS'
+          extraction_method: 'HTML_SCHEDULE_OF_INVESTMENTS',
+          time_period: '2017-2024'
         }),
         {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -818,8 +819,8 @@ serve(async (req) => {
             totalInvestments += investments.length
             console.log(`[SENTRY] ✅ ${bdc.ticker}: ${investments.length} portfolio investments extracted`)
             
-            // Rate limiting between BDCs
-            await new Promise(resolve => setTimeout(resolve, 2000)) // 2 seconds between BDCs
+            // Rate limiting between BDCs - increased due to more filings per BDC
+            await new Promise(resolve => setTimeout(resolve, 3000)) // 3 seconds between BDCs
             
           } catch (error) {
             console.error(`[SENTRY] ❌ Failed to process ${bdc.ticker}:`, error)
@@ -834,7 +835,7 @@ serve(async (req) => {
         }
 
         const successfulExtractions = results.filter(r => r.success).length;
-        console.log(`[SENTRY] Schedule of Investments backfill complete: ${successfulExtractions}/${bdcsToProcess.length} BDCs successful, ${totalInvestments} total portfolio investments`);
+        console.log(`[SENTRY] Historical Schedule of Investments backfill complete: ${successfulExtractions}/${bdcsToProcess.length} BDCs successful, ${totalInvestments} total portfolio investments since 2017`);
 
         return new Response(
           JSON.stringify({
@@ -842,8 +843,9 @@ serve(async (req) => {
             processed: results.length,
             totalInvestments,
             results,
-            message: `Schedule of Investments backfill completed: ${totalInvestments} total portfolio investments processed`,
-            extraction_method: 'HTML_SCHEDULE_OF_INVESTMENTS'
+            message: `Historical Schedule of Investments backfill completed: ${totalInvestments} total portfolio investments processed (2017-2024)`,
+            extraction_method: 'HTML_SCHEDULE_OF_INVESTMENTS',
+            time_period: '2017-2024'
           }),
           {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
