@@ -1,19 +1,24 @@
 // File: src/pages/AdminPanel.tsx
 // COMPLETE REPLACEMENT - Replace entire file with this code
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, CheckCircle, XCircle, Play, Download, Database } from 'lucide-react';
+import { Loader2, CheckCircle, XCircle, Play, Download, Database, RefreshCw } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
 
 interface BDC {
-  cik: string;
+  id: string;
+  cik: number;
   ticker: string;
-  name: string;
-  marketCap?: string;
-  sector?: string;
+  company_name: string;
+  is_active: boolean;
+  fiscal_year_end_month: number;
+  fiscal_year_end_day: number;
+  created_at: string;
+  updated_at: string;
 }
 
 interface ExtractionResult {
@@ -36,69 +41,102 @@ interface ExtractionResult {
 
 export default function BDCAdminPage() {
   const [loading, setLoading] = useState(false);
+  const [loadingBDCs, setLoadingBDCs] = useState(true);
   const [results, setResults] = useState<ExtractionResult | null>(null);
   const [selectedBDCs, setSelectedBDCs] = useState<string[]>([]);
   const [currentOperation, setCurrentOperation] = useState<string>('');
+  const [bdcList, setBdcList] = useState<BDC[]>([]);
+  const [bdcError, setBdcError] = useState<string | null>(null);
 
-  // Updated BDC list with CIKs for SEC API - Expanded with Large/Mid-Cap BDCs
-  const bdcList: BDC[] = [
-    // Original 10 BDCs
-    { cik: '1476765', ticker: 'GBDC', name: 'Golub Capital BDC', marketCap: '$1.1B', sector: 'Middle Market' },
-    { cik: '1287750', ticker: 'ARCC', name: 'Ares Capital Corp', marketCap: '$7.4B', sector: 'Diversified' },
-    { cik: '1552198', ticker: 'WHF', name: 'Whitehorse Finance', marketCap: '$900M', sector: 'Middle Market' },
-    { cik: '1414932', ticker: 'TSLX', name: 'TPG Specialty Lending', marketCap: '$1.4B', sector: 'Specialty' },
-    { cik: '1403909', ticker: 'PSEC', name: 'Prospect Capital', marketCap: '$2.5B', sector: 'Diversified' },
-    { cik: '1423902', ticker: 'NMFC', name: 'New Mountain Finance', marketCap: '$1.0B', sector: 'Growth' },
-    { cik: '1113169', ticker: 'AINV', name: 'Apollo Investment Corp', marketCap: '$1.1B', sector: 'Diversified' },
-    { cik: '1398560', ticker: 'FSIC', name: 'FS Investment Corporation', marketCap: '$3.3B', sector: 'Diversified' },
-    { cik: '1689029', ticker: 'BXSL', name: 'Blackstone Secured Lending', marketCap: '$5.2B', sector: 'Secured' },
-    { cik: '1517342', ticker: 'TCPC', name: 'BlackRock TCP Capital', marketCap: '$825M', sector: 'Middle Market' },
+  // Load BDCs from bdc_universe table
+  useEffect(() => {
+    loadBDCsFromDatabase();
+  }, []);
+
+  const loadBDCsFromDatabase = async () => {
+    setLoadingBDCs(true);
+    setBdcError(null);
     
-    // Additional Large/Mid-Cap BDCs
-    { cik: '1871683', ticker: 'OBDC', name: 'Blue Owl Capital Corporation', marketCap: '$4.2B', sector: 'Direct Lending' },
-    { cik: '1414932', ticker: 'OCSL', name: 'Oaktree Specialty Lending', marketCap: '$3.1B', sector: 'Specialty' },
-    { cik: '1572694', ticker: 'GSBD', name: 'Goldman Sachs BDC', marketCap: '$2.8B', sector: 'Middle Market' },
-    { cik: '1425890', ticker: 'MAIN', name: 'Main Street Capital', marketCap: '$2.4B', sector: 'Lower Middle Market' },
-    { cik: '1280784', ticker: 'HTGC', name: 'Hercules Capital', marketCap: '$2.1B', sector: 'Technology' },
-    { cik: '1579982', ticker: 'CGBD', name: 'TCG BDC', marketCap: '$1.8B', sector: 'Middle Market' },
-    { cik: '1566502', ticker: 'BBDC', name: 'Barings BDC', marketCap: '$1.2B', sector: 'Middle Market' },
-    { cik: '1505294', ticker: 'SLRC', name: 'SLR Investment Corp', marketCap: '$1.5B', sector: 'Middle Market' },
-    { cik: '1379785', ticker: 'CSWC', name: 'Capital Southwest Corporation', marketCap: '$800M', sector: 'Lower Middle Market' },
-    { cik: '1105472', ticker: 'GAIN', name: 'Gladstone Investment Corporation', marketCap: '$500M', sector: 'Lower Middle Market' }
-  ];
+    try {
+      console.log('🔍 Loading BDCs from bdc_universe table...');
+      
+      const { data, error } = await supabase
+        .from('bdc_universe')
+        .select('*')
+        .eq('is_active', true)
+        .order('ticker');
+
+      if (error) {
+        console.error('❌ Error loading BDCs:', error);
+        setBdcError(`Failed to load BDCs: ${error.message}`);
+        
+        // Fallback to minimal list with corrected PSEC CIK
+        setBdcList([
+          {
+            id: 'fallback-1',
+            cik: 1287750,
+            ticker: 'ARCC',
+            company_name: 'Ares Capital Corporation',
+            is_active: true,
+            fiscal_year_end_month: 12,
+            fiscal_year_end_day: 31,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          },
+          {
+            id: 'fallback-2',
+            cik: 1287032, // Corrected PSEC CIK
+            ticker: 'PSEC',
+            company_name: 'Prospect Capital Corporation',
+            is_active: true,
+            fiscal_year_end_month: 6,
+            fiscal_year_end_day: 30,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }
+        ]);
+        return;
+      }
+
+      if (!data || data.length === 0) {
+        setBdcError('No active BDCs found in database');
+        return;
+      }
+
+      console.log(`✅ Loaded ${data.length} BDCs from database:`, data.map(bdc => bdc.ticker).join(', '));
+      setBdcList(data);
+      
+    } catch (error) {
+      console.error('🔥 Error loading BDCs:', error);
+      setBdcError(error instanceof Error ? error.message : 'Unknown error occurred');
+    } finally {
+      setLoadingBDCs(false);
+    }
+  };
 
   const callSECExtractor = async (action: string, data?: any) => {
     setLoading(true);
     setCurrentOperation(action);
     
     try {
-      // Hardcoded values (temporary fix for environment variable issues)
-      const supabaseUrl = "https://pkpvyqvcsmyxcudamerw.supabase.co";
-      const supabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBrcHZ5cXZjc215eGN1ZGFtZXJ3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTMzMjMxMTgsImV4cCI6MjA2ODg5OTExOH0.XHyg3AzXz70Ad1t-E7oiiw0wFhCxUfG1H41HitZgKQY";
+      console.log(`🚀 Calling SEC extractor with action: ${action}`, data);
       
-      console.log('🚀 Calling Supabase function directly:', `${supabaseUrl}/functions/v1/sec-extractor`);
-      
-      const response = await fetch(`${supabaseUrl}/functions/v1/sec-extractor`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${supabaseAnonKey}`,
-        },
-        body: JSON.stringify({ action, ...data })
+      const { data: result, error } = await supabase.functions.invoke('sec-extractor', {
+        body: {
+          action,
+          ...data
+        }
       });
-      
-      console.log('📡 Response status:', response.status);
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('❌ Supabase function error:', errorText);
-        throw new Error(`Supabase function failed: ${response.status} ${response.statusText}`);
+
+      if (error) {
+        console.error('❌ Supabase function error:', error);
+        throw new Error(`SEC extractor failed: ${error.message}`);
       }
       
-      const result = await response.json();
-      console.log('✅ Function result:', result);
+      console.log('✅ SEC extractor result:', result);
       setResults(result);
       return result;
+      
     } catch (error) {
       console.error('🔥 Error calling SEC extractor:', error);
       const errorResult = { 
@@ -114,23 +152,47 @@ export default function BDCAdminPage() {
   };
 
   const handleExtractAll = () => {
+    console.log(`📊 Starting extraction for all ${bdcList.length} BDCs from database`);
     callSECExtractor('backfill_all');
   };
 
   const handleExtractSelected = () => {
     const selected = bdcList.filter(bdc => selectedBDCs.includes(bdc.ticker));
-    callSECExtractor('backfill_all', { bdcList: selected });
+    console.log(`📊 Starting extraction for ${selected.length} selected BDCs:`, selected.map(bdc => bdc.ticker).join(', '));
+    
+    // Convert to format expected by SEC extractor
+    const bdcListForExtractor = selected.map(bdc => ({
+      cik: bdc.cik.toString(),
+      ticker: bdc.ticker
+    }));
+    
+    callSECExtractor('backfill_all', { bdcList: bdcListForExtractor });
   };
 
   const handleExtractSingle = (bdc: BDC) => {
-    callSECExtractor('extract_filing', { ticker: bdc.ticker, cik: bdc.cik });
+    console.log(`🎯 Starting extraction for single BDC: ${bdc.ticker} (${bdc.cik})`);
+    callSECExtractor('extract_filing', { 
+      ticker: bdc.ticker, 
+      cik: bdc.cik.toString() 
+    });
   };
 
   const handleTestAPI = async () => {
-    // Test with Golub BDC first (smallest, most reliable)
+    // Test with ARCC first (reliable, large dataset)
+    const testBDC = bdcList.find(bdc => bdc.ticker === 'ARCC') || bdcList[0];
+    
+    if (!testBDC) {
+      setResults({
+        success: false,
+        error: 'No BDCs available for testing'
+      });
+      return;
+    }
+
+    console.log(`🧪 Testing SEC API with ${testBDC.ticker} (${testBDC.cik})`);
     await callSECExtractor('extract_filing', { 
-      ticker: 'GBDC', 
-      cik: '1476765' 
+      ticker: testBDC.ticker, 
+      cik: testBDC.cik.toString() 
     });
   };
 
@@ -150,13 +212,69 @@ export default function BDCAdminPage() {
     setSelectedBDCs([]);
   };
 
+  const getMarketCapCategory = (ticker: string): string => {
+    // Categorize BDCs by approximate market cap
+    const largeCap = ['ARCC', 'BXSL', 'OBDC', 'OCSL'];
+    const midCap = ['PSEC', 'GSBD', 'MAIN', 'HTGC', 'CGBD', 'FSIC'];
+    
+    if (largeCap.includes(ticker)) return 'Large Cap';
+    if (midCap.includes(ticker)) return 'Mid Cap';
+    return 'Small Cap';
+  };
+
+  const getSectorByTicker = (ticker: string): string => {
+    // Basic sector classification
+    const sectors: Record<string, string> = {
+      'ARCC': 'Diversified',
+      'BXSL': 'Secured Lending',
+      'PSEC': 'Diversified',
+      'HTGC': 'Technology',
+      'MAIN': 'Lower Middle Market',
+      'GBDC': 'Middle Market',
+      'TSLX': 'Specialty Lending',
+      'OBDC': 'Direct Lending',
+      'OCSL': 'Specialty Lending',
+      'GSBD': 'Middle Market'
+    };
+    
+    return sectors[ticker] || 'Middle Market';
+  };
+
+  if (loadingBDCs) {
+    return (
+      <div className="p-6 space-y-6 max-w-7xl mx-auto">
+        <div className="flex items-center justify-center min-h-96">
+          <div className="text-center space-y-4">
+            <Loader2 className="h-8 w-8 animate-spin mx-auto text-blue-600" />
+            <div>
+              <h3 className="text-lg font-medium">Loading BDC Universe</h3>
+              <p className="text-sm text-gray-600">Fetching active BDCs from database...</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold text-gray-900">BDC Data Management</h1>
-        <Badge variant="outline" className="text-sm">
-          SEC API v2.0 - Hardcoded Values (Temporary Fix)
-        </Badge>
+        <div className="flex items-center space-x-2">
+          <Badge variant="outline" className="text-sm">
+            {bdcList.length} Active BDCs
+          </Badge>
+          <Button 
+            onClick={loadBDCsFromDatabase}
+            variant="ghost"
+            size="sm"
+            className="flex items-center space-x-1"
+            disabled={loadingBDCs}
+          >
+            <RefreshCw className={`h-4 w-4 ${loadingBDCs ? 'animate-spin' : ''}`} />
+            <span>Refresh</span>
+          </Button>
+        </div>
       </div>
       
       {/* Status Banner */}
@@ -166,25 +284,39 @@ export default function BDCAdminPage() {
             <CheckCircle className="h-5 w-5 text-blue-600" />
             <div>
               <p className="text-sm font-medium text-blue-900">
-                ✨ New SEC API Integration Active
+                ✨ BDC Universe Integration Active
               </p>
               <p className="text-xs text-blue-700">
-                Using official SEC APIs for reliable data extraction. Hardcoded values bypassing env var issues!
+                Pulling {bdcList.length} active BDCs from bdc_universe table. PSEC CIK corrected to 1287032.
               </p>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* Debug Info */}
+      {/* Error Display */}
+      {bdcError && (
+        <Alert variant="destructive">
+          <XCircle className="h-4 w-4" />
+          <AlertDescription>
+            <div className="space-y-2">
+              <div className="font-medium">Database Connection Issue:</div>
+              <div className="text-sm">{bdcError}</div>
+              <div className="text-sm">Using fallback BDC list with corrected PSEC CIK.</div>
+            </div>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {/* Connection Info */}
       <Card className="border-green-200 bg-green-50">
         <CardContent className="pt-4">
           <div className="text-xs text-green-800">
-            <strong>Connection Status:</strong><br/>
-            Supabase URL: ✅ Hardcoded (https://pkpvyqvcsmyxcudamerw.supabase.co)<br/>
-            Supabase Key: ✅ Hardcoded (anon key)<br/>
-            Function URL: https://pkpvyqvcsmyxcudamerw.supabase.co/functions/v1/sec-extractor<br/>
-            <strong>Status: Ready to test!</strong>
+            <strong>Data Source:</strong> BDC Universe Table (Supabase)<br/>
+            <strong>SEC API:</strong> data.sec.gov (Official)<br/>
+            <strong>Total BDCs:</strong> {bdcList.length} active companies<br/>
+            <strong>Last Updated:</strong> {new Date().toLocaleString()}<br/>
+            <strong>Status:</strong> ✅ Ready for extraction
           </div>
         </CardContent>
       </Card>
@@ -199,11 +331,11 @@ export default function BDCAdminPage() {
         </CardHeader>
         <CardContent>
           <p className="text-sm text-gray-600 mb-4">
-            Test the new SEC API approach with Golub BDC (small, reliable dataset)
+            Test the SEC API integration with {bdcList.find(bdc => bdc.ticker === 'ARCC')?.company_name || 'a sample BDC'} (reliable dataset)
           </p>
           <Button 
             onClick={handleTestAPI}
-            disabled={loading}
+            disabled={loading || bdcList.length === 0}
             variant="outline"
             className="flex items-center space-x-2"
           >
@@ -212,7 +344,12 @@ export default function BDCAdminPage() {
             ) : (
               <Play className="h-4 w-4" />
             )}
-            <span>{loading && currentOperation === 'extract_filing' ? 'Testing...' : 'Test API with GBDC'}</span>
+            <span>
+              {loading && currentOperation === 'extract_filing' 
+                ? 'Testing...' 
+                : `Test API with ${bdcList.find(bdc => bdc.ticker === 'ARCC')?.ticker || 'Sample BDC'}`
+              }
+            </span>
           </Button>
         </CardContent>
       </Card>
@@ -229,7 +366,7 @@ export default function BDCAdminPage() {
           <div>
             <Button 
               onClick={handleExtractAll}
-              disabled={loading}
+              disabled={loading || bdcList.length === 0}
               className="w-full bg-blue-600 hover:bg-blue-700 flex items-center justify-center space-x-2"
             >
               {loading && currentOperation === 'backfill_all' ? (
@@ -239,13 +376,13 @@ export default function BDCAdminPage() {
               )}
               <span>
                 {loading && currentOperation === 'backfill_all' 
-                  ? 'Extracting All BDCs...' 
-                  : '🚀 Extract All BDCs (Recommended)'
+                  ? `Extracting All ${bdcList.length} BDCs...` 
+                  : `🚀 Extract All ${bdcList.length} BDCs (Recommended)`
                 }
               </span>
             </Button>
             <p className="text-xs text-gray-500 mt-1">
-              Uses SEC APIs - much faster and more reliable than old HTML parsing
+              Processes all active BDCs from your database using official SEC APIs
             </p>
           </div>
 
@@ -274,7 +411,7 @@ export default function BDCAdminPage() {
                 onClick={selectAll} 
                 variant="ghost" 
                 size="sm"
-                disabled={loading}
+                disabled={loading || bdcList.length === 0}
               >
                 All
               </Button>
@@ -300,48 +437,59 @@ export default function BDCAdminPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-3">
-            {bdcList.map(bdc => (
-              <div key={bdc.ticker} className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50">
-                <div className="flex items-center space-x-3">
-                  <input
-                    type="checkbox"
-                    checked={selectedBDCs.includes(bdc.ticker)}
-                    onChange={() => toggleBDCSelection(bdc.ticker)}
-                    disabled={loading}
-                    className="h-4 w-4 text-blue-600 rounded border-gray-300"
-                  />
-                  <div className="flex-1">
-                    <div className="flex items-center space-x-3">
-                      <span className="font-medium text-lg">{bdc.ticker}</span>
-                      <Badge variant="secondary" className="text-xs">
-                        {bdc.marketCap}
-                      </Badge>
-                      <Badge variant="outline" className="text-xs">
-                        {bdc.sector}
-                      </Badge>
+          {bdcList.length === 0 ? (
+            <div className="text-center py-8 text-gray-500">
+              <Database className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+              <p>No active BDCs found in database</p>
+              <p className="text-sm">Check your bdc_universe table</p>
+            </div>
+          ) : (
+            <div className="grid gap-3">
+              {bdcList.map(bdc => (
+                <div key={bdc.ticker} className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50">
+                  <div className="flex items-center space-x-3">
+                    <input
+                      type="checkbox"
+                      checked={selectedBDCs.includes(bdc.ticker)}
+                      onChange={() => toggleBDCSelection(bdc.ticker)}
+                      disabled={loading}
+                      className="h-4 w-4 text-blue-600 rounded border-gray-300"
+                    />
+                    <div className="flex-1">
+                      <div className="flex items-center space-x-3">
+                        <span className="font-medium text-lg">{bdc.ticker}</span>
+                        <Badge variant="secondary" className="text-xs">
+                          {getMarketCapCategory(bdc.ticker)}
+                        </Badge>
+                        <Badge variant="outline" className="text-xs">
+                          {getSectorByTicker(bdc.ticker)}
+                        </Badge>
+                        <Badge variant="outline" className="text-xs">
+                          FYE: {bdc.fiscal_year_end_month}/{bdc.fiscal_year_end_day}
+                        </Badge>
+                      </div>
+                      <div className="text-sm text-gray-600">{bdc.company_name}</div>
+                      <div className="text-xs text-gray-400">CIK: {bdc.cik}</div>
                     </div>
-                    <div className="text-sm text-gray-600">{bdc.name}</div>
-                    <div className="text-xs text-gray-400">CIK: {bdc.cik}</div>
                   </div>
+                  <Button
+                    size="sm"
+                    onClick={() => handleExtractSingle(bdc)}
+                    disabled={loading}
+                    variant="outline"
+                    className="flex items-center space-x-1"
+                  >
+                    {loading && currentOperation === 'extract_filing' ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Download className="h-3 w-3" />
+                    )}
+                    <span>Extract</span>
+                  </Button>
                 </div>
-                <Button
-                  size="sm"
-                  onClick={() => handleExtractSingle(bdc)}
-                  disabled={loading}
-                  variant="outline"
-                  className="flex items-center space-x-1"
-                >
-                  {loading && currentOperation === 'extract_filing' ? (
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                  ) : (
-                    <Download className="h-3 w-3" />
-                  )}
-                  <span>Extract</span>
-                </Button>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -452,31 +600,41 @@ export default function BDCAdminPage() {
       {/* Information Panel */}
       <Card className="border-gray-200">
         <CardHeader>
-          <CardTitle className="text-lg">ℹ️ How This Works</CardTitle>
+          <CardTitle className="text-lg">ℹ️ System Information</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="grid md:grid-cols-2 gap-4 text-sm">
             <div>
               <h4 className="font-medium text-green-700 mb-2">✅ What's New:</h4>
               <ul className="space-y-1 text-gray-600">
-                <li>• Uses official SEC APIs instead of HTML parsing</li>
-                <li>• Processes structured XBRL data directly</li>
-                <li>• No more memory crashes with large files</li>
-                <li>• 95%+ success rate vs previous parsing failures</li>
-                <li>• 10x faster processing speed</li>
-                <li>• Direct Supabase function calls with hardcoded values</li>
+                <li>• Pulls all BDCs from bdc_universe table dynamically</li>
+                <li>• Fixed PSEC CIK from 1403909 to 1287032</li>
+                <li>• Processes {bdcList.length} active BDCs instead of 6 hardcoded</li>
+                <li>• Uses official SEC APIs for structured data</li>
+                <li>• Auto-refreshes BDC list from database</li>
+                <li>• Supports individual and batch operations</li>
               </ul>
             </div>
             <div>
               <h4 className="font-medium text-blue-700 mb-2">🎯 Best Practices:</h4>
               <ul className="space-y-1 text-gray-600">
                 <li>• Start with "Test API" button first</li>
-                <li>• Use "Extract All" for full refresh</li>
+                <li>• Use "Extract All" for full {bdcList.length} BDC refresh</li>
                 <li>• Check Supabase logs for detailed progress</li>
-                <li>• Large BDCs (ARCC) may take 2-3 minutes</li>
-                <li>• SEC API is rate-limited to 10 requests/second</li>
-                <li>• Check browser console for debugging info</li>
+                <li>• Large BDCs may take 2-3 minutes each</li>
+                <li>• SEC API rate-limited to 10 requests/second</li>
+                <li>• Add new BDCs to bdc_universe table</li>
               </ul>
+            </div>
+          </div>
+          
+          <div className="mt-4 p-3 bg-gray-50 rounded-lg">
+            <h4 className="font-medium text-gray-700 mb-2">📊 Current BDC Universe:</h4>
+            <div className="text-xs text-gray-600">
+              <strong>Total Active BDCs:</strong> {bdcList.length}<br/>
+              <strong>Sample Tickers:</strong> {bdcList.slice(0, 10).map(bdc => bdc.ticker).join(', ')}{bdcList.length > 10 ? '...' : ''}<br/>
+              <strong>Data Source:</strong> bdc_universe table (Supabase)<br/>
+              <strong>Auto-scales:</strong> Add BDCs to table and they're included automatically
             </div>
           </div>
         </CardContent>
