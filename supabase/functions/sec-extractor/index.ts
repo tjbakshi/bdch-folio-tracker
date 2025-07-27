@@ -3,7 +3,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { parseScheduleOfInvestments } from './parse_scheduel_test.ts';
+import { parseScheduleOfInvestments } from './parse_schedule_test.ts';
 
 // Types for Schedule of Investments data
 interface PortfolioInvestment {
