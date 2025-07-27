@@ -118,17 +118,19 @@ class ScheduleOfInvestmentsExtractor {
     for (let i = 0; i < recent.form.length; i++) {
       const form = recent.form[i];
       const filingDate = recent.filingDate[i];
+      const primaryDocument = recent.primaryDocument[i];
       
       // Only get 10-K and 10-Q filings from 2017 onwards
       if ((form === '10-K' || form === '10-Q') && 
-          new Date(filingDate) > new Date('2017-01-01')) {
+          new Date(filingDate) > new Date('2017-01-01') &&
+          primaryDocument && primaryDocument.length > 0) {
         
         filings.push({
           accessionNumber: recent.accessionNumber[i],
           filingDate: recent.filingDate[i],
           reportDate: recent.reportDate[i] || recent.filingDate[i],
           form: form,
-          primaryDocument: recent.primaryDocument[i],
+          primaryDocument: primaryDocument,
           size: recent.size[i]
         });
       }
@@ -138,6 +140,14 @@ class ScheduleOfInvestmentsExtractor {
     }
     
     console.log(`[SENTRY] Found ${filings.length} 10-K/10-Q filings since 2017 for CIK ${cik}`);
+    
+    // Log first few filings for debugging
+    if (filings.length > 0) {
+      console.log(`[SENTRY] Sample filings:`, filings.slice(0, 3).map(f => 
+        `${f.form} (${f.filingDate}): ${f.primaryDocument}`
+      ));
+    }
+    
     return filings;
   }
 
@@ -170,9 +180,15 @@ class ScheduleOfInvestmentsExtractor {
   }
 
   parseScheduleOfInvestments(htmlContent: string, filing: SECFiling, ticker: string, companyId: string): PortfolioInvestment[] {
-    console.log(`[SENTRY] Parsing Schedule of Investments from ${filing.form} filing`);
+    console.log(`[SENTRY] Parsing Schedule of Investments from ${filing.form} filing (${htmlContent.length} chars)`);
     
     try {
+      // Basic validation
+      if (!htmlContent || htmlContent.length < 1000) {
+        console.log(`[SENTRY] HTML content too short (${htmlContent.length} chars), likely not a valid filing`);
+        return [];
+      }
+
       const doc = new DOMParser().parseFromString(htmlContent, 'text/html');
       if (!doc) {
         throw new Error('Failed to parse HTML document');
@@ -184,12 +200,18 @@ class ScheduleOfInvestmentsExtractor {
       const tables = doc.querySelectorAll('table');
       console.log(`[SENTRY] Found ${tables.length} tables in filing`);
 
+      let tablesProcessed = 0;
+      
       for (const table of tables) {
         // Find tables that look like Schedule of Investments
         const tableText = table.textContent?.toLowerCase() || '';
         
         if (this.isScheduleOfInvestmentsTable(tableText)) {
-          console.log(`[SENTRY] Found potential Schedule of Investments table`);
+          console.log(`[SENTRY] Found potential Schedule of Investments table ${tablesProcessed + 1}`);
+          
+          // Log a sample of the table content for debugging
+          const tablePreview = tableText.substring(0, 500);
+          console.log(`[SENTRY] Table preview: ${tablePreview}...`);
           
           const tableInvestments = this.parseInvestmentTable(
             table, 
@@ -199,10 +221,14 @@ class ScheduleOfInvestmentsExtractor {
           );
           
           investments.push(...tableInvestments);
+          tablesProcessed++;
+          
+          // Stop after processing a few tables to avoid parsing non-investment tables
+          if (tablesProcessed >= 3) break;
         }
       }
 
-      console.log(`[SENTRY] Extracted ${investments.length} investments from ${filing.form}`);
+      console.log(`[SENTRY] Extracted ${investments.length} investments from ${filing.form} after processing ${tablesProcessed} tables`);
       return investments;
 
     } catch (error) {
@@ -213,24 +239,41 @@ class ScheduleOfInvestmentsExtractor {
 
   private isScheduleOfInvestmentsTable(tableText: string): boolean {
     // Look for key indicators that this is a Schedule of Investments table
-    const indicators = [
+    const primaryIndicators = [
       'schedule of investments',
       'consolidated schedule of investments',
+      'portfolio investments'
+    ];
+    
+    const secondaryIndicators = [
       'portfolio company',
       'fair value',
       'principal',
       'maturity date',
       'acquisition date',
       'coupon',
-      'business description'
+      'business description',
+      'investment type',
+      'amortized cost'
     ];
 
-    const matchCount = indicators.filter(indicator => 
+    // Must have at least one primary indicator
+    const hasPrimaryIndicator = primaryIndicators.some(indicator => 
+      tableText.includes(indicator)
+    );
+    
+    // Count secondary indicators
+    const secondaryMatches = secondaryIndicators.filter(indicator => 
       tableText.includes(indicator)
     ).length;
 
-    // If we find at least 4 indicators, it's likely a Schedule of Investments
-    return matchCount >= 4;
+    // Scoring system
+    const score = (hasPrimaryIndicator ? 10 : 0) + secondaryMatches;
+    
+    console.log(`[SENTRY] Table scoring - Primary: ${hasPrimaryIndicator}, Secondary: ${secondaryMatches}, Total: ${score}`);
+    
+    // Need high confidence this is an investment table
+    return score >= 12 || (hasPrimaryIndicator && secondaryMatches >= 4);
   }
 
   private parseInvestmentTable(table: Element, filing: SECFiling, ticker: string, companyId: string): PortfolioInvestment[] {
