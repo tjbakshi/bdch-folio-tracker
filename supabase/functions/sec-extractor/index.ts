@@ -204,20 +204,51 @@ class SECAPIExtractor {
     
     console.log(`[SENTRY] Available US-GAAP concepts: ${Object.keys(usGaap).length}`);
     
-    // Key investment-related XBRL concepts for BDCs
+    // Log all available concepts for debugging
+    const allConcepts = Object.keys(usGaap);
+    console.log(`[SENTRY] First 20 available concepts:`, allConcepts.slice(0, 20).join(', '));
+    console.log(`[SENTRY] Investment-related concepts found:`, allConcepts.filter(c => 
+      c.toLowerCase().includes('investment') || 
+      c.toLowerCase().includes('schedule') ||
+      c.toLowerCase().includes('portfolio') ||
+      c.toLowerCase().includes('security') ||
+      c.toLowerCase().includes('debt') ||
+      c.toLowerCase().includes('equity')
+    ));
+
+    // Broader search for BDC investment concepts (including GBDC-specific ones)
     const investmentConcepts = [
+      // Standard BDC concepts
       'ScheduleOfInvestmentsInAndAdvancesToAffiliatesAtFairValue',
       'ScheduleOfInvestmentsUnaffiliatedIssuersAtFairValue', 
       'InvestmentsFairValueDisclosure',
-      'AvailableForSaleSecuritiesFairValue',
-      'DebtSecuritiesFairValue',
-      'EquitySecuritiesFairValue',
-      'InvestmentIncomeInterest',
+      'InvestmentsAtFairValue',
       'InvestmentCompaniesInvestments',
       'ScheduleOfInvestmentsInSecuritiesOwned',
       'ScheduleOfPortfolioInvestments',
-      'InvestmentsAtFairValue',
-      'InvestmentCompaniesInvestmentsOwned'
+      
+      // Securities concepts
+      'AvailableForSaleSecuritiesFairValue',
+      'DebtSecuritiesFairValue',
+      'EquitySecuritiesFairValue',
+      'TradingSecuritiesFairValue',
+      'HeldToMaturitySecuritiesFairValue',
+      
+      // Alternative investment concepts
+      'Assets',
+      'Investments',
+      'InvestmentIncomeInterest',
+      'InvestmentIncomeDividend',
+      'LoansAndAdvancesAtFairValue',
+      'NotesReceivableNet',
+      'FinancialInstrumentsAtFairValue',
+      
+      // Look for any concept with key words
+      ...allConcepts.filter(concept => {
+        const lower = concept.toLowerCase();
+        return (lower.includes('investment') || lower.includes('security') || lower.includes('loan')) &&
+               (lower.includes('fair') || lower.includes('value') || lower.includes('amount'));
+      })
     ];
 
     // Look for investment concepts that actually exist
@@ -299,8 +330,8 @@ class SECAPIExtractor {
     try {
       const fairValue = parseFloat(fact.val) || 0;
       
-      // Skip zero or very small values (likely not real investments)
-      if (fairValue < 1000) {
+      // For debugging, accept smaller values initially
+      if (fairValue < 100) {
         return null;
       }
 
@@ -324,6 +355,8 @@ class SECAPIExtractor {
 
       // Generate unique raw_id
       const rawId = `${ticker}_${concept}_${accessionNumber || 'unknown'}_${reportDate}_${fairValue}`;
+
+      console.log(`[SENTRY] Creating investment: ${this.extractIssuerName(fact, concept)} - ${fairValue.toLocaleString()}`);
 
       const investment: Investment = {
         company_id: companyId,
