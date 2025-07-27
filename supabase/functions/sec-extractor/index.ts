@@ -541,7 +541,22 @@ serve(async (req) => {
     
     const supabase = createClient(supabaseUrl, supabaseServiceRoleKey)
 
-    const { action, ticker, cik, bdcList } = await req.json()
+    const body = await req.json().catch(() => ({}));
+    const { action, ticker, cik, bdcList } = body;
+
+    // Handle smoke test (no action provided)
+    if (!action) {
+      return new Response(
+        JSON.stringify({
+          success: true,
+          message: 'SEC Extractor is running. Supported actions: extract_filing, backfill_ticker, backfill_all, incremental_check',
+          available_actions: ['extract_filing', 'backfill_ticker', 'backfill_all', 'incremental_check']
+        }),
+        {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        },
+      )
+    }
 
     const extractor = new SECAPIExtractor()
 
