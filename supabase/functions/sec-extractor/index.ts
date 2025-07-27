@@ -182,17 +182,17 @@ class SECFilingExtractor {
   }
 
   async extractInvestmentsFromText(content: string, filing: SECFiling, ticker: string, companyId: string): Promise<PortfolioInvestment[]> {
-    console.log(`[SENTRY] Extracting investments from text content (${content.length} chars)`);
+    console.log(`[SENTRY] Extracting investments from content (${content.length} chars)`);
     
     const investments: PortfolioInvestment[] = [];
     
     try {
-      // Look for Schedule of Investments sections in the text
+      // Look for Schedule of Investments sections in the content
       const scheduleRegex = /schedule\s+of\s+investments/gi;
       const matches = content.match(scheduleRegex);
       
       if (!matches) {
-        console.log(`[SENTRY] No "Schedule of Investments" found in filing text`);
+        console.log(`[SENTRY] No "Schedule of Investments" found in filing content`);
         return investments;
       }
       
@@ -206,22 +206,127 @@ class SECFilingExtractor {
         return investments;
       }
       
-      // Extract a reasonable section around the schedule (50KB should be enough)
-      const extractStart = Math.max(0, scheduleStart - 5000);
-      const extractEnd = Math.min(content.length, scheduleStart + 50000);
+      // Extract a larger section around the schedule for better context
+      const extractStart = Math.max(0, scheduleStart - 10000);
+      const extractEnd = Math.min(content.length, scheduleStart + 100000);
       const scheduleSection = content.substring(extractStart, extractEnd);
       
       console.log(`[SENTRY] Extracted schedule section (${scheduleSection.length} chars)`);
       
-      // Use regex patterns to find investment data
-      const investmentEntries = this.parseInvestmentEntriesFromText(scheduleSection, filing, ticker, companyId);
+      // First, try to parse as HTML structure (most likely case)
+      const htmlInvestments = this.parseHTMLInvestments(scheduleSection, filing, ticker, companyId);
+      investments.push(...htmlInvestments);
       
-      investments.push(...investmentEntries);
+      // If HTML parsing didn't work, try text patterns
+      if (investments.length === 0) {
+        const textInvestments = this.parseInvestmentEntriesFromText(scheduleSection, filing, ticker, companyId);
+        investments.push(...textInvestments);
+      }
       
-      console.log(`[SENTRY] Extracted ${investments.length} investments from text analysis`);
+      // If still nothing, try to log some sample content for debugging
+      if (investments.length === 0) {
+        console.log(`[SENTRY] No investments found. Sample content:`);
+        const sampleLines = scheduleSection.split('\n').slice(0, 20);
+        for (let i = 0; i < Math.min(5, sampleLines.length); i++) {
+          const line = sampleLines[i].trim();
+          if (line.length > 10) {
+            console.log(`[SENTRY] Line ${i}: ${line.substring(0, 100)}...`);
+          }
+        }
+      }
+      
+      console.log(`[SENTRY] Extracted ${investments.length} investments from content analysis`);
       
     } catch (error) {
-      console.error(`[SENTRY] Error extracting from text:`, error);
+      console.error(`[SENTRY] Error extracting from content:`, error);
+    }
+    
+    return investments;
+  }
+
+  private parseHTMLInvestments(content: string, filing: SECFiling, ticker: string, companyId: string): PortfolioInvestment[] {
+    const investments: PortfolioInvestment[] = [];
+    
+    try {
+      console.log(`[SENTRY] Attempting HTML/table parsing...`);
+      
+      // Remove HTML tags but keep structure
+      const cleanedContent = content
+        .replace(/<script[^>]*>.*?<\/script>/gi, '')
+        .replace(/<style[^>]*>.*?<\/style>/gi, '')
+        .replace(/<[^>]*>/g, ' ')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/\s+/g, ' ')
+        .trim();
+      
+      // Look for tabular data patterns in cleaned content
+      const lines = cleanedContent.split('\n');
+      let investmentIndex = 0;
+      const processedCompanies = new Set();
+      
+      console.log(`[SENTRY] Analyzing ${lines.length} lines for investment data...`);
+      
+      for (const line of lines) {
+        if (investmentIndex >= 100) break; // Reasonable limit
+        
+        const trimmedLine = line.trim();
+        if (trimmedLine.length < 20) continue;
+        
+        // Look for lines that might contain investment data
+        // Pattern: Company name followed by numbers (amounts)
+        const investmentLineRegex = /^([A-Z][a-zA-Z\s&.,'\-()]{5,80}?)\s+.*?(\d{1,3}(?:,\d{3})*)\s*$/;
+        const match = trimmedLine.match(investmentLineRegex);
+        
+        if (match) {
+          const companyName = match[1].trim();
+          const amountStr = match[2].replace(/,/g, '');
+          const amount = parseInt(amountStr);
+          
+          // Validation
+          if (amount > 1000 && 
+              companyName.length > 3 && 
+              companyName.length < 80 &&
+              !processedCompanies.has(companyName.toLowerCase()) &&
+              !companyName.match(/^(total|subtotal|other|various|page|table|schedule)$/i)) {
+            
+            processedCompanies.add(companyName.toLowerCase());
+            
+            const rawId = `${ticker}_${filing.accessionNumber}_html_${investmentIndex}`;
+            
+            const investment: PortfolioInvestment = {
+              company_id: companyId,
+              raw_id: rawId,
+              portfolio_company: companyName,
+              investment_type: 'Investment',
+              fair_value: amount * 1000, // Assume thousands
+              reporting_date: filing.reportDate,
+              filing_date: filing.filingDate,
+              form_type: filing.form,
+              accession_number: filing.accessionNumber,
+              fiscal_year: new Date(filing.filingDate).getFullYear(),
+              fiscal_period: filing.form === '10-K' ? 'FY' : 'Q' + Math.ceil((new Date(filing.reportDate).getMonth() + 1) / 3),
+              non_accrual: false,
+              extraction_method: 'HTML_TABLE_PARSING',
+              footnotes: `HTML parsing from ${filing.form}`
+            };
+            
+            investments.push(investment);
+            investmentIndex++;
+            
+            if (investmentIndex <= 5) {
+              console.log(`[SENTRY] HTML found: ${companyName} = ${(amount * 1000).toLocaleString()}`);
+            }
+          }
+        }
+      }
+      
+      console.log(`[SENTRY] HTML parsing extracted ${investments.length} investments`);
+      
+    } catch (error) {
+      console.error(`[SENTRY] Error in HTML parsing:`, error);
     }
     
     return investments;
