@@ -1,5 +1,3 @@
-// Updated HTML parser using cheerio, with enhanced resilience to handle ARCC 10-Q edge cases
-
 import * as cheerio from 'https://esm.sh/cheerio@1.0.0-rc.12';
 
 function cleanText(value: string): string {
@@ -16,7 +14,11 @@ function parseAmount(value: string): number | undefined {
 
 function extractHeaders($: cheerio.CheerioAPI, table: cheerio.Element): Record<string, number> {
   const mapping: Record<string, number> = {};
-  const headers = $(table).find('thead tr').first().find('th, td');
+
+  let headers = $(table).find('thead tr').first().find('th, td');
+  if (headers.length === 0) {
+    headers = $(table).find('tr').first().find('th, td');
+  }
 
   headers.each((index, el) => {
     const text = $(el).text().toLowerCase().trim();
