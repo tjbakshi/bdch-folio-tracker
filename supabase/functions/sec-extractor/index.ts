@@ -1,5 +1,5 @@
 // File: supabase/functions/sec-extractor/index.ts
-// Replace your entire existing sec-extractor function with this code
+// Updated SEC extractor with improved database operations and error handling
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
@@ -43,28 +43,27 @@ interface SECSubmission {
 }
 
 interface Investment {
-  issuer: string;
-  title: string;
-  cusip?: string;
-  fair_value: number;
-  cost_basis?: number;
-  principal_amount?: number;
-  shares?: number;
-  interest_rate?: string;
-  maturity_date?: string;
+  company_id: string;
+  raw_id: string;
+  portfolio_company: string;
   investment_type: string;
   industry?: string;
-  geography?: string;
-  is_non_accrual?: boolean;
-  footnotes?: string;
+  fair_value: number;
+  cost_basis?: number;
+  shares_units?: number;
+  reporting_date: string;
   filing_date: string;
-  report_date: string;
-  cik: string;
-  ticker: string;
-  accession_number?: string;
-  xbrl_concept?: string;
-  filing_form?: string;
+  form_type: string;
+  accession_number: string;
+  fiscal_year: number;
+  fiscal_period: string;
+  non_accrual: boolean;
+  pik_income?: number;
+  cash_income?: number;
+  total_income?: number;
   extraction_method?: string;
+  xbrl_concept?: string;
+  footnotes?: string;
 }
 
 class SECAPIExtractor {
@@ -95,6 +94,11 @@ class SECAPIExtractor {
     if (!response.ok) {
       const errorText = await response.text();
       console.error(`[SENTRY] SEC API error: ${response.status} ${response.statusText} - ${errorText}`);
+      
+      if (response.status === 403) {
+        throw new Error(`SEC API 403 Forbidden - Check User-Agent header. Response: ${errorText}`);
+      }
+      
       throw new Error(`SEC API error: ${response.status} ${response.statusText}`);
     }
     
@@ -122,10 +126,25 @@ class SECAPIExtractor {
   /**
    * Extract BDC investments using SEC's structured data APIs
    */
-  async extractBDCInvestments(cik: string, ticker: string): Promise<Investment[]> {
+  async extractBDCInvestments(cik: string, ticker: string, supabase: any): Promise<Investment[]> {
     console.log(`[SENTRY] Starting BDC extraction for ${ticker} (CIK: ${cik})`);
     
     try {
+      // Get company ID from database first
+      const { data: companies, error: companyError } = await supabase
+        .from('bdc_companies')
+        .select('id')
+        .eq('ticker', ticker.toUpperCase())
+        .single();
+
+      if (companyError || !companies) {
+        console.error(`[SENTRY] Company ${ticker} not found in database:`, companyError);
+        throw new Error(`Company ${ticker} not found in database`);
+      }
+
+      const companyId = companies.id;
+      console.log(`[SENTRY] Found company ID: ${companyId} for ${ticker}`);
+
       // Get company facts (contains all XBRL data)
       const facts = await this.getCompanyFacts(cik);
       console.log(`[SENTRY] Retrieved facts for ${facts.entityName}`);
@@ -135,24 +154,22 @@ class SECAPIExtractor {
       console.log(`[SENTRY] Found ${submissions.filings.recent.form.length} recent filings`);
 
       // Extract investments from XBRL facts
-      const investments = await this.extractInvestmentsFromFacts(facts, submissions, ticker);
+      const investments = await this.extractInvestmentsFromFacts(facts, submissions, ticker, companyId);
       
       console.log(`[SENTRY] Extracted ${investments.length} investments from ${ticker}`);
       return investments;
 
     } catch (error) {
       console.error(`[SENTRY] Error extracting BDC investments for ${ticker}:`, error);
-      
-      // Return empty array instead of trying HTML fallback for now
-      console.log(`[SENTRY] SEC API extraction failed for ${ticker}, returning empty results`);
-      return [];
+      throw error;
     }
   }
 
   private async extractInvestmentsFromFacts(
     facts: SECCompanyFacts, 
     submissions: SECSubmission, 
-    ticker: string
+    ticker: string,
+    companyId: string
   ): Promise<Investment[]> {
     const investments: Investment[] = [];
     const usGaap = facts.facts['us-gaap'] || {};
@@ -170,7 +187,9 @@ class SECAPIExtractor {
       'InvestmentIncomeInterest',
       'InvestmentCompaniesInvestments',
       'ScheduleOfInvestmentsInSecuritiesOwned',
-      'ScheduleOfPortfolioInvestments'
+      'ScheduleOfPortfolioInvestments',
+      'InvestmentsAtFairValue',
+      'InvestmentCompaniesInvestmentsOwned'
     ];
 
     // Look for investment concepts that actually exist
@@ -193,7 +212,7 @@ class SECAPIExtractor {
           console.log(`[SENTRY] Processing ${factList.length} USD facts for ${concept}`);
           
           for (const fact of factList) {
-            const investment = this.parseInvestmentFact(fact, submissions, ticker, facts.cik, concept);
+            const investment = this.parseInvestmentFact(fact, submissions, ticker, facts.cik, concept, companyId);
             if (investment) {
               investments.push(investment);
             }
@@ -205,7 +224,7 @@ class SECAPIExtractor {
     // If no structured investment data found, try individual company concept calls
     if (investments.length === 0) {
       console.log(`[SENTRY] No investments found in company facts, trying individual concept calls`);
-      await this.tryIndividualConceptCalls(facts.cik, investments, ticker, submissions);
+      await this.tryIndividualConceptCalls(facts.cik, investments, ticker, submissions, companyId);
     }
 
     return investments;
@@ -215,7 +234,8 @@ class SECAPIExtractor {
     cik: string, 
     investments: Investment[], 
     ticker: string, 
-    submissions: SECSubmission
+    submissions: SECSubmission,
+    companyId: string
   ): Promise<void> {
     // Try specific Schedule of Investments concepts via individual API calls
     const conceptsToTry = [
@@ -232,7 +252,7 @@ class SECAPIExtractor {
         
         if (conceptData && conceptData.units && conceptData.units.USD) {
           console.log(`[SENTRY] Found data for ${concept}: ${conceptData.units.USD.length} facts`);
-          this.processConceptData(conceptData, investments, ticker, submissions, concept);
+          this.processConceptData(conceptData, investments, ticker, submissions, concept, companyId);
         }
       } catch (error) {
         console.log(`[SENTRY] Concept ${concept} not available: ${error.message}`);
@@ -245,7 +265,8 @@ class SECAPIExtractor {
     submissions: SECSubmission, 
     ticker: string, 
     cik: string,
-    concept: string
+    concept: string,
+    companyId: string
   ): Investment | null {
     try {
       // Find the corresponding filing info
@@ -264,19 +285,28 @@ class SECAPIExtractor {
         return null;
       }
 
+      const formType = submissions.filings.recent.form[filingIndex];
+      const filingDate = submissions.filings.recent.filingDate[filingIndex];
+      const reportDate = fact.end || submissions.filings.recent.reportDate[filingIndex];
+
+      // Generate unique raw_id
+      const rawId = `${ticker}_${concept}_${accessionNumber}_${reportDate}_${fairValue}`;
+
       const investment: Investment = {
-        issuer: this.extractIssuerName(fact, concept),
-        title: this.extractInvestmentTitle(fact, concept),
-        fair_value: fairValue,
+        company_id: companyId,
+        raw_id: rawId,
+        portfolio_company: this.extractIssuerName(fact, concept),
         investment_type: this.determineInvestmentType(fact, concept),
-        filing_date: submissions.filings.recent.filingDate[filingIndex],
-        report_date: fact.end || submissions.filings.recent.reportDate[filingIndex],
-        cik: cik,
-        ticker: ticker,
+        fair_value: fairValue,
+        reporting_date: reportDate,
+        filing_date: filingDate,
+        form_type: formType,
         accession_number: accessionNumber,
-        xbrl_concept: concept,
-        filing_form: submissions.filings.recent.form[filingIndex],
-        extraction_method: 'SEC_API'
+        fiscal_year: fact.fy || new Date(filingDate).getFullYear(),
+        fiscal_period: fact.fp || 'FY',
+        non_accrual: false, // Default, would need additional logic to determine
+        extraction_method: 'SEC_API',
+        xbrl_concept: concept
       };
 
       // Add additional context if available
@@ -285,8 +315,7 @@ class SECAPIExtractor {
       }
 
       // Add form type to footnotes
-      const formType = submissions.filings.recent.form[filingIndex];
-      investment.footnotes = (investment.footnotes || '') + ` | Form: ${formType}`;
+      investment.footnotes = (investment.footnotes || '') + ` | Form: ${formType} | Concept: ${concept}`;
 
       return investment;
     } catch (error) {
@@ -298,21 +327,14 @@ class SECAPIExtractor {
   private extractIssuerName(fact: any, concept: string): string {
     // Try to extract issuer name from various fact properties
     if (fact.frame) return fact.frame;
-    if (fact.fp && fact.fp !== 'FY') return fact.fp;
+    if (fact.fp && fact.fp !== 'FY') return `${fact.fp} Investment`;
     if (concept.includes('Affiliate')) return 'Affiliated Investment';
-    return 'Investment Holding';
-  }
-
-  private extractInvestmentTitle(fact: any, concept: string): string {
-    // Generate a descriptive title based on the concept and fact properties
-    let title = concept.replace(/([A-Z])/g, ' $1').trim();
-    title = title.replace(/^Schedule Of/, '').trim();
     
-    if (fact.segment) {
-      title += ` - ${fact.segment}`;
-    }
+    // Generate name based on concept
+    let name = concept.replace(/([A-Z])/g, ' $1').trim();
+    name = name.replace(/^Schedule Of/, '').replace(/At Fair Value$/, '').trim();
     
-    return title || 'Portfolio Investment';
+    return name || 'Investment Holding';
   }
 
   private processConceptData(
@@ -320,11 +342,12 @@ class SECAPIExtractor {
     investments: Investment[], 
     ticker: string, 
     submissions: SECSubmission,
-    concept: string
+    concept: string,
+    companyId: string
   ): void {
     if (conceptData.units && conceptData.units.USD) {
       for (const fact of conceptData.units.USD) {
-        const investment = this.parseInvestmentFact(fact, submissions, ticker, conceptData.cik, concept);
+        const investment = this.parseInvestmentFact(fact, submissions, ticker, conceptData.cik, concept, companyId);
         if (investment) {
           investments.push(investment);
         }
@@ -334,13 +357,15 @@ class SECAPIExtractor {
 
   private determineInvestmentType(fact: any, concept: string): string {
     // Determine investment type based on XBRL concept and context
-    if (concept.includes('Debt') || concept.includes('debt')) return 'Debt Security';
-    if (concept.includes('Equity') || concept.includes('equity')) return 'Equity Security';
-    if (concept.includes('Loan') || concept.includes('loan')) return 'Loan';
-    if (concept.includes('Bond') || concept.includes('bond')) return 'Bond';
-    if (concept.includes('Affiliate')) return 'Affiliated Investment';
+    const conceptLower = concept.toLowerCase();
     
-    return 'Other Investment';
+    if (conceptLower.includes('debt') || conceptLower.includes('loan')) return 'Debt';
+    if (conceptLower.includes('equity') || conceptLower.includes('stock')) return 'Equity';
+    if (conceptLower.includes('bond')) return 'Bond';
+    if (conceptLower.includes('affiliate')) return 'Affiliated';
+    if (conceptLower.includes('warrant')) return 'Warrant';
+    
+    return 'Other';
   }
 }
 
@@ -354,14 +379,16 @@ async function saveInvestmentsToDatabase(supabase: any, investments: Investment[
   console.log(`[SENTRY] Saving ${investments.length} investments to database`);
 
   try {
+    // Use the correct table name from your schema
     const { data, error } = await supabase
-      .from('investments')
+      .from('bdc_investments')
       .upsert(investments, {
-        onConflict: 'cik,accession_number,issuer,fair_value',
+        onConflict: 'raw_id',
         ignoreDuplicates: false
       });
 
     if (error) {
+      console.error('[SENTRY] Database upsert error:', error);
       throw error;
     }
 
@@ -370,6 +397,43 @@ async function saveInvestmentsToDatabase(supabase: any, investments: Investment[
     console.error('[SENTRY] Database save error:', error);
     throw error;
   }
+}
+
+// Helper function to get or create BDC company
+async function ensureBDCCompany(supabase: any, ticker: string, cik: string): Promise<string> {
+  // First try to find existing company
+  const { data: existing, error: findError } = await supabase
+    .from('bdc_companies')
+    .select('id')
+    .eq('ticker', ticker.toUpperCase())
+    .single();
+
+  if (existing && !findError) {
+    console.log(`[SENTRY] Found existing company: ${ticker} with ID: ${existing.id}`);
+    return existing.id;
+  }
+
+  // If not found, try to create it
+  console.log(`[SENTRY] Creating new company record for ${ticker}`);
+  
+  const { data: newCompany, error: createError } = await supabase
+    .from('bdc_companies')
+    .insert({
+      ticker: ticker.toUpperCase(),
+      cik: cik,
+      name: `${ticker.toUpperCase()} Corp`, // Default name, should be updated
+      last_updated: new Date().toISOString()
+    })
+    .select('id')
+    .single();
+
+  if (createError) {
+    console.error(`[SENTRY] Failed to create company ${ticker}:`, createError);
+    throw new Error(`Failed to create company ${ticker}: ${createError.message}`);
+  }
+
+  console.log(`[SENTRY] Created new company: ${ticker} with ID: ${newCompany.id}`);
+  return newCompany.id;
 }
 
 // Main handler function
@@ -385,8 +449,13 @@ serve(async (req) => {
 
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
-    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!
-    const supabase = createClient(supabaseUrl, supabaseAnonKey)
+    const supabaseServiceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    
+    if (!supabaseServiceRoleKey) {
+      throw new Error('SUPABASE_SERVICE_ROLE_KEY is required for database operations');
+    }
+    
+    const supabase = createClient(supabaseUrl, supabaseServiceRoleKey)
 
     const { action, ticker, cik, bdcList } = await req.json()
 
@@ -396,7 +465,14 @@ serve(async (req) => {
       case 'extract_filing': {
         console.log(`[SENTRY] Extracting single BDC: ${ticker} (${cik})`)
         
-        const investments = await extractor.extractBDCInvestments(cik, ticker)
+        if (!ticker || !cik) {
+          throw new Error('ticker and cik are required for extract_filing action');
+        }
+
+        // Ensure company exists in database
+        await ensureBDCCompany(supabase, ticker, cik);
+        
+        const investments = await extractor.extractBDCInvestments(cik, ticker, supabase)
         await saveInvestmentsToDatabase(supabase, investments)
 
         return new Response(
@@ -416,7 +492,14 @@ serve(async (req) => {
       case 'backfill_ticker': {
         console.log(`[SENTRY] Backfilling ticker: ${ticker} (${cik})`)
         
-        const investments = await extractor.extractBDCInvestments(cik, ticker)
+        if (!ticker || !cik) {
+          throw new Error('ticker and cik are required for backfill_ticker action');
+        }
+
+        // Ensure company exists in database
+        await ensureBDCCompany(supabase, ticker, cik);
+        
+        const investments = await extractor.extractBDCInvestments(cik, ticker, supabase)
         await saveInvestmentsToDatabase(supabase, investments)
 
         return new Response(
@@ -452,7 +535,11 @@ serve(async (req) => {
         for (const bdc of defaultBDCs) {
           try {
             console.log(`[SENTRY] Processing ${bdc.ticker}...`)
-            const investments = await extractor.extractBDCInvestments(bdc.cik, bdc.ticker)
+            
+            // Ensure company exists in database
+            await ensureBDCCompany(supabase, bdc.ticker, bdc.cik);
+            
+            const investments = await extractor.extractBDCInvestments(bdc.cik, bdc.ticker, supabase)
             await saveInvestmentsToDatabase(supabase, investments)
             
             results.push({
