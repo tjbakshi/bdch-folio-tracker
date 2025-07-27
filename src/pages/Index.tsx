@@ -29,19 +29,6 @@ const Index = () => {
         </div>
       )}
       
-      {!isAuthenticated && (
-        <div className="bg-yellow-50 border border-yellow-200 p-4 text-center">
-          <p className="text-sm text-yellow-800 mb-2">
-            Please sign in to access admin features
-          </p>
-          <Link to="/auth">
-            <Button variant="outline" size="sm">
-              Sign In
-            </Button>
-          </Link>
-        </div>
-      )}
-      
       <BDCDashboard />
     </div>
   );
