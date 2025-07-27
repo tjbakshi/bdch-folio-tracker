@@ -204,9 +204,16 @@ class SECFilingExtractor {
         return [];
       }
       
-      // Temporarily use legacy method due to import issues
-      console.log("[SENTRY] Using legacy extraction method (enhanced parser disabled)...");
+      // Use the enhanced HTML table parser
+      console.log("[SENTRY] Using enhanced schedule parser...");
+      const investments = parseScheduleOfInvestments(scheduleSection);
+
+      console.log(`[SENTRY] Enhanced parser extracted ${investments.length} investments`);
+
+      if (investments.length === 0) {
+      console.log("[SENTRY] No investments found with enhanced parser, trying legacy method");
       return this.extractInvestmentsLegacy(scheduleSection, filing, ticker, companyId);
+}
       
       // Format for database
       const formattedInvestments = investments.map((inv, index) => ({
