@@ -1,0 +1,17 @@
+name: Test SEC Parser
+
+on:
+  workflow_dispatch: # Allows manual run from GitHub UI
+  push:
+    branches: [ main ]
+
+jobs:
+  test-parser:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Test Parser with Curl
+        run: |
+          echo "🔍 Sending test HTML to your Vercel API..."
+          curl -X POST https://bdch-folio-tracker.vercel.app/api/sec-parser \
+            -H "Content-Type: application/json" \
+            -d '{"html": "<html><body><table><tr><td>ACME Corp</td><td>Tech</td><td>$1,000</td></tr></table></body></html>"}'
