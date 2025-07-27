@@ -1,5 +1,5 @@
 // File: supabase/functions/sec-extractor/index.ts
-// SEC extractor with proper error handling and no boot errors
+// SEC extractor with proper error handling and BDC universe integration
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
@@ -64,6 +64,16 @@ interface Investment {
   extraction_method?: string;
   xbrl_concept?: string;
   footnotes?: string;
+}
+
+interface BDCRecord {
+  id: string;
+  ticker: string;
+  company_name: string;
+  cik: number;
+  is_active: boolean;
+  fiscal_year_end_month: number;
+  fiscal_year_end_day: number;
 }
 
 class SECAPIExtractor {
@@ -520,6 +530,38 @@ async function ensureBDCCompany(supabase: any, ticker: string, cik: string): Pro
   }
 }
 
+// Helper function to fetch BDCs from database
+async function getBDCsFromDatabase(supabase: any): Promise<BDCRecord[]> {
+  console.log('[SENTRY] Fetching BDCs from bdc_universe table');
+  
+  try {
+    const { data: bdcUniverse, error } = await supabase
+      .from('bdc_universe')
+      .select('id, ticker, company_name, cik, is_active, fiscal_year_end_month, fiscal_year_end_day')
+      .eq('is_active', true)
+      .order('ticker');
+
+    if (error) {
+      console.error('[SENTRY] Error fetching BDC universe:', error);
+      throw new Error(`Failed to fetch BDC universe: ${error.message}`);
+    }
+
+    if (!bdcUniverse || bdcUniverse.length === 0) {
+      console.log('[SENTRY] No active BDCs found in bdc_universe table');
+      throw new Error('No active BDCs found in database');
+    }
+
+    console.log(`[SENTRY] Found ${bdcUniverse.length} active BDCs in database:`, 
+      bdcUniverse.map(bdc => `${bdc.ticker}(${bdc.cik})`).join(', '));
+
+    return bdcUniverse;
+
+  } catch (error) {
+    console.error('[SENTRY] Failed to fetch BDCs from database:', error);
+    throw error;
+  }
+}
+
 // Main handler function
 serve(async (req) => {
   const corsHeaders = {
@@ -586,20 +628,41 @@ serve(async (req) => {
       }
 
       case 'backfill_ticker': {
-        console.log(`[SENTRY] Backfilling ticker: ${ticker} (${cik})`)
+        console.log(`[SENTRY] Backfilling ticker: ${ticker}`)
         
-        if (!ticker || !cik) {
-          throw new Error('ticker and cik are required for backfill_ticker action');
+        if (!ticker) {
+          throw new Error('ticker is required for backfill_ticker action');
         }
 
-        const investments = await extractor.extractBDCInvestments(cik, ticker, supabase)
+        let targetCik = cik;
+        
+        // If no CIK provided, look it up in bdc_universe table
+        if (!targetCik) {
+          console.log(`[SENTRY] No CIK provided, looking up ${ticker} in bdc_universe table`);
+          
+          const { data: bdcRecord, error: lookupError } = await supabase
+            .from('bdc_universe')
+            .select('cik')
+            .eq('ticker', ticker.toUpperCase())
+            .eq('is_active', true)
+            .single();
+
+          if (lookupError || !bdcRecord) {
+            throw new Error(`Ticker ${ticker} not found in BDC universe or is inactive`);
+          }
+          
+          targetCik = bdcRecord.cik.toString();
+          console.log(`[SENTRY] Found CIK ${targetCik} for ${ticker}`);
+        }
+
+        const investments = await extractor.extractBDCInvestments(targetCik, ticker, supabase)
         await saveInvestmentsToDatabase(supabase, investments)
 
         return new Response(
           JSON.stringify({
             success: true,
             ticker,
-            cik,
+            cik: targetCik,
             investmentsFound: investments.length,
             message: `Backfill completed for ${ticker}: ${investments.length} investments found`
           }),
@@ -610,51 +673,76 @@ serve(async (req) => {
       }
 
       case 'backfill_all': {
-        console.log('[SENTRY] Starting backfill for all BDCs')
+        console.log('[SENTRY] Starting backfill for all BDCs from bdc_universe table')
         
-        // Default BDC list
-        const defaultBDCs = bdcList || [
-          { cik: '1476765', ticker: 'GBDC' },
-          { cik: '1287750', ticker: 'ARCC' },
-          { cik: '1552198', ticker: 'WHF' },
-          { cik: '1414932', ticker: 'TSLX' },
-          { cik: '1403909', ticker: 'PSEC' },
-          { cik: '1423902', ticker: 'NMFC' },
-        ]
+        let bdcsToProcess: BDCRecord[];
+        
+        try {
+          // Get BDCs from database instead of hardcoded list
+          bdcsToProcess = await getBDCsFromDatabase(supabase);
+        } catch (error) {
+          console.error('[SENTRY] Failed to fetch BDCs from database, falling back to legacy list');
+          
+          // Fallback to hardcoded list if database fetch fails
+          const defaultBDCs = bdcList || [
+            { cik: '1476765', ticker: 'GBDC' },
+            { cik: '1287750', ticker: 'ARCC' },
+            { cik: '1552198', ticker: 'WHF' },
+            { cik: '1414932', ticker: 'TSLX' },
+            { cik: '1287032', ticker: 'PSEC' }, // Fixed PSEC CIK
+            { cik: '1423902', ticker: 'NMFC' },
+          ];
+
+          bdcsToProcess = defaultBDCs.map(bdc => ({
+            id: bdc.ticker,
+            ticker: bdc.ticker,
+            company_name: `${bdc.ticker} Corp`,
+            cik: parseInt(bdc.cik),
+            is_active: true,
+            fiscal_year_end_month: 12,
+            fiscal_year_end_day: 31
+          }));
+        }
 
         const results = []
         let totalInvestments = 0
 
-        for (const bdc of defaultBDCs) {
+        console.log(`[SENTRY] Processing ${bdcsToProcess.length} BDCs from database`);
+
+        for (const bdc of bdcsToProcess) {
           try {
-            console.log(`[SENTRY] Processing ${bdc.ticker}...`)
+            console.log(`[SENTRY] Processing ${bdc.ticker} (${bdc.company_name}) - CIK: ${bdc.cik}...`)
             
-            const investments = await extractor.extractBDCInvestments(bdc.cik, bdc.ticker, supabase)
+            const investments = await extractor.extractBDCInvestments(bdc.cik.toString(), bdc.ticker, supabase)
             await saveInvestmentsToDatabase(supabase, investments)
             
             results.push({
               ticker: bdc.ticker,
-              cik: bdc.cik,
+              cik: bdc.cik.toString(),
               investmentsFound: investments.length,
               success: true
             })
             
             totalInvestments += investments.length
+            console.log(`[SENTRY] ✅ ${bdc.ticker}: ${investments.length} investments extracted`)
             
             // Rate limiting between BDCs
             await new Promise(resolve => setTimeout(resolve, 1000))
             
           } catch (error) {
-            console.error(`[SENTRY] Failed to process ${bdc.ticker}:`, error)
+            console.error(`[SENTRY] ❌ Failed to process ${bdc.ticker}:`, error)
             results.push({
               ticker: bdc.ticker,
-              cik: bdc.cik,
+              cik: bdc.cik.toString(),
               investmentsFound: 0,
               success: false,
               error: error.message
             })
           }
         }
+
+        const successfulExtractions = results.filter(r => r.success).length;
+        console.log(`[SENTRY] Backfill complete: ${successfulExtractions}/${bdcsToProcess.length} BDCs successful, ${totalInvestments} total investments`);
 
         return new Response(
           JSON.stringify({
