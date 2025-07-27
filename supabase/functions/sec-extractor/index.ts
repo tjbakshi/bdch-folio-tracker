@@ -1,7 +1,7 @@
 // index.ts - Full Edge Function handler for sec-extractor
 
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
-import { parseScheduleOfInvestments } from "./parser.ts"; // Update path if needed
+import { parseScheduleOfInvestments } from "./html-parser.ts"; // ✅ corrected filename
 
 serve(async (req) => {
   if (req.method !== "POST") {
@@ -14,13 +14,13 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: "Missing required parameters" }), { status: 400 });
     }
 
-    const formattedCIK = cik.toString().padStart(10, '0');
-    const accessionNoHyphens = accession.replace(/-/g, '');
+    const formattedCIK = cik.toString().padStart(10, "0");
+    const accessionNoHyphens = accession.replace(/-/g, "");
     const baseUrl = `https://www.sec.gov/Archives/edgar/data/${formattedCIK}/${accessionNoHyphens}/${fileType}`;
 
     console.log(`[SENTRY] Fetching SEC filing from ${baseUrl}`);
     const response = await fetch(baseUrl, {
-      headers: { "User-Agent": "sec-extractor-edge/1.0 (tjbakshi@gmail.com)" }
+      headers: { "User-Agent": "sec-extractor-edge/1.0 (tjbakshi@gmail.com)" },
     });
 
     if (!response.ok) {
@@ -34,13 +34,13 @@ serve(async (req) => {
 
     return new Response(JSON.stringify({ success: true, investments }), {
       status: 200,
-      headers: { "Content-Type": "application/json" }
+      headers: { "Content-Type": "application/json" },
     });
   } catch (error) {
     console.error("[SENTRY] Extraction failed:", error);
     return new Response(JSON.stringify({ error: "SEC extractor failed: " + error.message }), {
       status: 500,
-      headers: { "Content-Type": "application/json" }
+      headers: { "Content-Type": "application/json" },
     });
   }
 });
