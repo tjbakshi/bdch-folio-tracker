@@ -34,6 +34,7 @@ jobs:
           cp public/openapi.yaml dist/
           cp public/docs.html dist/
         env:
+          # <-- these two must be VITE_‑prefixed for Vite to see them
           VITE_SUPABASE_URL:      ${{ secrets.SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
 
@@ -56,5 +57,5 @@ jobs:
           vercel-token:      ${{ secrets.VERCEL_TOKEN }}
           vercel-org-id:     ${{ secrets.VERCEL_ORG_ID }}
           vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
-          vercel-args:       --prod
+          vercel-args:       '--prod'
           working-directory: .
