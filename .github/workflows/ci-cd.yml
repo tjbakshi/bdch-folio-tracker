@@ -1,0 +1,60 @@
+# File: .github/workflows/ci-cd.yml
+name: 🚀 Build & Deploy
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    env:
+      NODE_VERSION: 18.x
+
+    steps:
+      # 1) Checkout repository
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2) Setup Node.js and install dependencies
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # 3) Build your Vite application
+      - name: Build Vite application
+        run: |
+          npm run build
+          cp public/openapi.yaml dist/
+          cp public/docs.html dist/
+        env:
+          VITE_SUPABASE_URL:      ${{ secrets.SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+
+      # 4) Deploy Supabase Edge Functions
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Deploy Edge Functions
+        run: |
+          supabase login --token="${{ secrets.SUPABASE_ACCESS_TOKEN }}"
+          supabase functions deploy sec-extractor --project-ref="${{ secrets.SUPABASE_PROJECT_REF }}"
+          supabase functions deploy bdc-api        --project-ref="${{ secrets.SUPABASE_PROJECT_REF }}"
+
+      # 5) Deploy to Vercel
+      - name: Deploy to Vercel
+        uses: amondnet/vercel-action@v25
+        with:
+          vercel-token:      ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id:     ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          vercel-args:       --prod
+          working-directory: .
