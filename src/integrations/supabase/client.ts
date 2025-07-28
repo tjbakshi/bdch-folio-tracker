@@ -1,11 +1,15 @@
 // File: src/integrations/supabase/client.ts
-
 import { createClient } from '@supabase/supabase-js'
 import type { Database } from './types'  // adjust path if needed
 
-// Supabase configuration
-const SUPABASE_URL = 'https://pkpvyqvcsmyxcudamerw.supabase.co'
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBrcHZ5cXZjc215eGN1ZGFtZXJ3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTMzMjMxMTgsImV4cCI6MjA2ODg5OTExOH0.XHyg3AzXz70Ad1t-E7oiiw0wFhCxUfG1H41HitZgKQY'
+const SUPABASE_URL      = import.meta.env.VITE_SUPABASE_URL
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
+
+if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+  throw new Error(
+    'Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY'
+  )
+}
 
 export const supabase = createClient<Database>(
   SUPABASE_URL,
@@ -15,7 +19,7 @@ export const supabase = createClient<Database>(
       storage: typeof window !== 'undefined' ? localStorage : undefined,
       persistSession: true,
       autoRefreshToken: true,
-    },
-    // functions URL is automatically SUPABASE_URL + '/functions/v1'
+    }
+    // your functions URL is automatically `${SUPABASE_URL}/functions/v1`
   }
 )
