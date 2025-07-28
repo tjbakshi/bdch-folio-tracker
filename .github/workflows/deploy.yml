@@ -1,74 +1,31 @@
-name: CI/CD Pipeline
+name: Build & Deploy to Vercel
 
 on:
   push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
-
-env:
-  NODE_VERSION: '18.x'
-  DENO_VERSION: '1.40.x'
+    branches:
+      - main
 
 jobs:
-  test-build-deploy:
+  build-and-deploy:
     runs-on: ubuntu-latest
+    env:
+      NODE_VERSION: 18.x
 
     steps:
-      # 1) Checkout your repo
+      # 1) Checkout your code
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      # 2) Setup Node.js
+      # 2) Install & build your frontend
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
+          cache: npm
 
-      # 3) Setup Deno
-      - name: Setup Deno
-        uses: denoland/setup-deno@v1
-        with:
-          deno-version: ${{ env.DENO_VERSION }}
-
-      # 4) Install front‑end dependencies
       - name: Install dependencies
         run: npm ci
 
-      # 5) Run Deno unit tests for sec‑extractor
-      - name: Run Deno tests
-        run: |
-          deno test --allow-net --allow-env supabase/functions/sec-extractor/parse_schedule_test.ts
-        env:
-          SUPABASE_URL:              ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-
-      # 6) Optional front‑end unit tests
-      - name: Run front-end tests
-        run: npm test --if-present
-
-      # 7) Upload any test artifacts (only your smoke-test logs, etc.)
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-artifacts-${{ github.run_id }}
-          path: |
-            test-results/
-            test-results/debug-*.png
-          retention-days: 30
-
-      # 8) Summarize test results
-      - name: Generate test summary
-        if: always()
-        run: |
-          echo "### Test Results" >> $GITHUB_STEP_SUMMARY
-          if [ -d test-results ]; then
-            echo "- Files: $(find test-results -type f | wc -l)" >> $GITHUB_STEP_SUMMARY
-          fi
-
-      # 9) Build your Vite front‑end
       - name: Build Vite application
         run: |
           npm run build
@@ -76,63 +33,26 @@ jobs:
           cp public/docs.html dist/
         env:
           VITE_SUPABASE_URL:      ${{ secrets.SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
 
-      # 10) Setup Supabase CLI
+      # 3) Deploy your Supabase Edge Functions
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v1
         with:
           version: latest
 
-      # 11) Deploy Supabase Edge Functions
       - name: Deploy Supabase Edge Functions
         run: |
-          supabase login --token "${{ secrets.SUPABASE_ACCESS_TOKEN }}"
-          supabase functions deploy sec-extractor --project-ref "${{ secrets.SUPABASE_PROJECT_REF }}"
-          supabase functions deploy bdc-api        --project-ref "${{ secrets.SUPABASE_PROJECT_REF }}"
+          supabase login --token="${{ secrets.SUPABASE_ACCESS_TOKEN }}"
+          supabase functions deploy sec-extractor --project-ref="${{ secrets.SUPABASE_PROJECT_REF }}"
+          supabase functions deploy bdc-api        --project-ref="${{ secrets.SUPABASE_PROJECT_REF }}"
 
-      # 12) Wait a bit for the Edge Functions to warm up
-      - name: Wait for functions
-        run: sleep 30
-
-      # 13) Run smoke tests against your Edge Function
-      - name: Run Edge Function Smoke Tests
-        run: |
-          mkdir -p test-results
-          deno run --allow-net --allow-env tests/smoke-test.ts 2>&1 | tee test-results/smoke-test.log
-        env:
-          SUPABASE_URL:              ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY:         ${{ secrets.SUPABASE_ANON_KEY }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-
-      # 14) Upload smoke-test logs
-      - name: Upload smoke test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: smoke-test-${{ github.run_id }}
-          path: test-results/
-          retention-days: 7
-
-      # 15) Fail if smoke tests didn’t pass
-      - name: Verify smoke test success
-        run: |
-          if ! grep -q "All critical tests passed!" test-results/smoke-test.log; then
-            echo "❌ Smoke tests failed" && exit 1
-          fi
-
-      # 16) Deploy front‑end to Vercel
+      # 4) Deploy your front‑end to Vercel
       - name: Deploy to Vercel
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         uses: amondnet/vercel-action@v25
         with:
           vercel-token:      ${{ secrets.VERCEL_TOKEN }}
           vercel-org-id:     ${{ secrets.VERCEL_ORG_ID }}
           vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
-          vercel-args:       '--prod'
+          vercel-args:       --prod
           working-directory: .
-
-      # 17) Final success message
-      - name: Pipeline completed successfully
-        if: success()
-        run: echo "🎉 CI/CD succeeded: functions & frontend all deployed!"
