@@ -15,141 +15,113 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout your repo (includes .git for Vercel action)
+      # 1) Checkout your repo
       - name: Checkout code
         uses: actions/checkout@v3
 
-      # 2. Setup Node.js
+      # 2) Setup Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
 
-      # 3. Setup Deno
+      # 3) Setup Deno
       - name: Setup Deno
         uses: denoland/setup-deno@v1
         with:
           deno-version: ${{ env.DENO_VERSION }}
 
-      # 4. Install NPM deps
+      # 4) Install front‑end dependencies
       - name: Install dependencies
         run: npm ci
 
-      # 5. Run your Deno unit tests
+      # 5) Run Deno unit tests for sec‑extractor
       - name: Run Deno tests
         run: |
-          echo "Running SEC parsing tests..."
           deno test --allow-net --allow-env supabase/functions/sec-extractor/parse_schedule_test.ts
         env:
-          SUPABASE_URL:                ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY:   ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_URL:              ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
 
-      # 6. Run front‑end unit tests (if any)
+      # 6) Optional front‑end unit tests
       - name: Run front-end tests
         run: npm test --if-present
 
-      # 7. Install Playwright browsers
-      - name: Install Playwright Browsers
-        run: npx playwright install --with-deps
-
-      # 8. (Optional) Run E2E tests
-      - name: Run E2E tests
-        run: |
-          echo "🎭 Starting Playwright E2E tests..."
-          # Uncomment once you configure `npm run test:e2e`
-          # TEST_START_TIME=$(date +%s000) npm run test:e2e
-        env:
-          PLAYWRIGHT_BASE_URL: ${{ secrets.VERCEL_URL }}
-          SUPABASE_URL:        ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY:   ${{ secrets.SUPABASE_ANON_KEY }}
-          CI:                  true
-
-      # 9. Upload all test artifacts
+      # 7) Upload any test artifacts (only your smoke-test logs, etc.)
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report-${{ github.run_id }}
+          name: test-artifacts-${{ github.run_id }}
           path: |
-            playwright-report/
             test-results/
             test-results/debug-*.png
           retention-days: 30
 
-      # 10. Summarize test results in the GitHub UI
+      # 8) Summarize test results
       - name: Generate test summary
         if: always()
         run: |
-          echo "📊 Generating test summary..."
-          if [ -d "test-results" ]; then
-            echo "### Test Results Summary" >> $GITHUB_STEP_SUMMARY
-            echo "- Artifacts: playwright-report-${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY
-            COUNT=$(find test-results -type f | wc -l)
-            echo "- Files: $COUNT" >> $GITHUB_STEP_SUMMARY
+          echo "### Test Results" >> $GITHUB_STEP_SUMMARY
+          if [ -d test-results ]; then
+            echo "- Files: $(find test-results -type f | wc -l)" >> $GITHUB_STEP_SUMMARY
           fi
 
-      # 11. Build your Vite front‑end
+      # 9) Build your Vite front‑end
       - name: Build Vite application
         run: |
-          echo "Building front-end..."
           npm run build
-          echo "Copying API docs..."
           cp public/openapi.yaml dist/
-          cp public/docs.html    dist/
+          cp public/docs.html dist/
         env:
           VITE_SUPABASE_URL:      ${{ secrets.SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
 
-      # 12. Install Supabase CLI
+      # 10) Setup Supabase CLI
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v1
         with:
           version: latest
 
-      # 13. Deploy Supabase Edge Functions
+      # 11) Deploy Supabase Edge Functions
       - name: Deploy Supabase Edge Functions
         run: |
-          echo "Deploying Edge Functions..."
           supabase login --token "${{ secrets.SUPABASE_ACCESS_TOKEN }}"
           supabase functions deploy sec-extractor --project-ref "${{ secrets.SUPABASE_PROJECT_REF }}"
           supabase functions deploy bdc-api        --project-ref "${{ secrets.SUPABASE_PROJECT_REF }}"
 
-      # 14. Wait a few seconds for propagation
-      - name: Wait for function deployment
+      # 12) Wait a bit for the Edge Functions to warm up
+      - name: Wait for functions
         run: sleep 30
 
-      # 15. Smoke‑test your Edge Function
+      # 13) Run smoke tests against your Edge Function
       - name: Run Edge Function Smoke Tests
         run: |
-          echo "🧪 Running smoke tests..."
           mkdir -p test-results
-          deno run --allow-net --allow-env tests/smoke-test.ts \
-            2>&1 | tee test-results/smoke-test-output.log
+          deno run --allow-net --allow-env tests/smoke-test.ts 2>&1 | tee test-results/smoke-test.log
         env:
           SUPABASE_URL:              ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY:         ${{ secrets.SUPABASE_ANON_KEY }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
 
-      # 16. Upload smoke test logs
+      # 14) Upload smoke-test logs
       - name: Upload smoke test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: smoke-test-results
+          name: smoke-test-${{ github.run_id }}
           path: test-results/
           retention-days: 7
 
-      # 17. Fail the job if smoke tests didn’t pass
+      # 15) Fail if smoke tests didn’t pass
       - name: Verify smoke test success
         run: |
-          echo "🔍 Verifying smoke tests..."
-          if ! grep -q "All critical tests passed!" test-results/smoke-test-output.log; then
-            echo "❌ Smoke tests failed"
-            exit 1
+          if ! grep -q "All critical tests passed!" test-results/smoke-test.log; then
+            echo "❌ Smoke tests failed" && exit 1
           fi
 
-      # 18. Deploy your built front‑end to Vercel
+      # 16) Deploy front‑end to Vercel
       - name: Deploy to Vercel
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         uses: amondnet/vercel-action@v25
@@ -160,5 +132,7 @@ jobs:
           vercel-args:       '--prod'
           working-directory: .
 
-      # 19. Celebrate! 🎉
-      - name: Pipeline completed
+      # 17) Final success message
+      - name: Pipeline completed successfully
+        if: success()
+        run: echo "🎉 CI/CD succeeded: functions & frontend all deployed!"
