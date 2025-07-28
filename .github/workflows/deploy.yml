@@ -2,15 +2,14 @@ name: Build & Deploy to Vercel
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
 
 jobs:
   build:
-    name: Build
     runs-on: ubuntu-latest
-
-    # ← Inject your Vite env‑vars here so `import.meta.env.VITE_…` works
     env:
+      # make sure these two are in your repo secrets
       VITE_SUPABASE_URL:      ${{ secrets.VITE_SUPABASE_URL }}
       VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
 
@@ -29,23 +28,22 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v3
         with:
           name: dist
           path: dist/
 
   deploy:
-    name: Deploy to Vercel
     needs: build
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
+      - name: Checkout code  ← this brings back your .git folder
         uses: actions/checkout@v3
 
       - name: Download build artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v3
         with:
           name: dist
           path: dist/
@@ -56,5 +54,8 @@ jobs:
           vercel-token:       ${{ secrets.VERCEL_TOKEN }}
           vercel-org-id:      ${{ secrets.VERCEL_ORG_ID }}
           vercel-project-id:  ${{ secrets.VERCEL_PROJECT_ID }}
+          # the slug/name of your Vercel project (as shown in your Vercel dashboard)
+          vercel-project-name: bdch‑folio‑tracker  
+          # point at your prebuilt "dist" folder, and go to production
           working-directory:  .
           vercel-args:        '--prod --prebuilt'
