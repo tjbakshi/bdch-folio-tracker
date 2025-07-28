@@ -34,23 +34,25 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      # 1) Checkout code so `.git` is present
+      # 1️⃣ Check out your full repo (so the Action can find .git, package.json, vercel.json, etc.)
       - name: Checkout code
         uses: actions/checkout@v3
 
-      # 2) Pull down the built `dist/` folder
+      # 2️⃣ Download the build artifact (optional: you can inspect it, but we won't deploy from there)
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
           name: dist
           path: dist/
 
-      # 3) Deploy that `dist/` directory to Vercel, production
+      # 3️⃣ Deploy from the repo root—Vercel will run your build itself
       - name: Deploy to Vercel
         uses: amondnet/vercel-action@v20
         with:
           vercel-token:       ${{ secrets.VERCEL_TOKEN }}
           vercel-org-id:      ${{ secrets.VERCEL_ORG_ID }}
           vercel-project-id:  ${{ secrets.VERCEL_PROJECT_ID }}
-          working-directory:  dist
+          # point at repo root so it picks up package.json & vercel.json
+          working-directory:  .
+          # force a prod deploy
           vercel-args:        '--prod'
