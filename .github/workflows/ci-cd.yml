@@ -13,203 +13,152 @@ env:
 jobs:
   test-build-deploy:
     runs-on: ubuntu-latest
-    
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      # 1. Checkout your repo (includes .git for Vercel action)
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ env.NODE_VERSION }}
-        cache: 'npm'
+      # 2. Setup Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
 
-    - name: Setup Deno
-      uses: denoland/setup-deno@v1
-      with:
-        deno-version: ${{ env.DENO_VERSION }}
+      # 3. Setup Deno
+      - name: Setup Deno
+        uses: denoland/setup-deno@v1
+        with:
+          deno-version: ${{ env.DENO_VERSION }}
 
-    - name: Install dependencies
-      run: npm ci
+      # 4. Install NPM deps
+      - name: Install dependencies
+        run: npm ci
 
-    - name: Run Deno tests
-      run: |
-        echo "Running SEC parsing tests..."
-        deno test --allow-net --allow-env supabase/functions/sec-extractor/parse_schedule_test.ts
-      env:
-        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-        SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      # 5. Run your Deno unit tests
+      - name: Run Deno tests
+        run: |
+          echo "Running SEC parsing tests..."
+          deno test --allow-net --allow-env supabase/functions/sec-extractor/parse_schedule_test.ts
+        env:
+          SUPABASE_URL:                ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY:   ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
 
-    - name: Run front-end tests
-      run: npm test --if-present
+      # 6. Run front‑end unit tests (if any)
+      - name: Run front-end tests
+        run: npm test --if-present
 
-    - name: Install Playwright Browsers
-      run: npx playwright install --with-deps
+      # 7. Install Playwright browsers
+      - name: Install Playwright Browsers
+        run: npx playwright install --with-deps
 
-    - name: Run E2E tests
-      run: |
-        echo "🎭 Starting Playwright E2E tests..."
-        echo "Note: test:e2e script not configured yet - skipping"
-        # TEST_START_TIME=$(date +%s000) npm run test:e2e
-      env:
-        PLAYWRIGHT_BASE_URL: http://localhost:5173
-        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-        SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-        TEST_START_TIME: ${{ github.run_id }}
-        CI: true
+      # 8. (Optional) Run E2E tests
+      - name: Run E2E tests
+        run: |
+          echo "🎭 Starting Playwright E2E tests..."
+          # Uncomment once you configure `npm run test:e2e`
+          # TEST_START_TIME=$(date +%s000) npm run test:e2e
+        env:
+          PLAYWRIGHT_BASE_URL: ${{ secrets.VERCEL_URL }}
+          SUPABASE_URL:        ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY:   ${{ secrets.SUPABASE_ANON_KEY }}
+          CI:                  true
 
-    - name: Upload test results
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: playwright-report-${{ github.run_id }}
-        path: |
-          playwright-report/
-          test-results/
-          test-results/debug-*.png
-        retention-days: 30
-        
-    - name: Generate test summary
-      if: always()
-      run: |
-        echo "📊 Generating test summary..."
-        if [ -d "test-results" ]; then
-          echo "### Test Results Summary" >> $GITHUB_STEP_SUMMARY
-          echo "- Test artifacts uploaded as: playwright-report-${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY
-          
-          # Count test files
-          TEST_COUNT=$(find test-results -name "*.xml" -o -name "*.json" | wc -l)
-          echo "- Test result files: $TEST_COUNT" >> $GITHUB_STEP_SUMMARY
-          
-          # Check for screenshots
-          SCREENSHOT_COUNT=$(find test-results -name "*.png" | wc -l)
-          if [ $SCREENSHOT_COUNT -gt 0 ]; then
-            echo "- Debug screenshots captured: $SCREENSHOT_COUNT" >> $GITHUB_STEP_SUMMARY
+      # 9. Upload all test artifacts
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ github.run_id }}
+          path: |
+            playwright-report/
+            test-results/
+            test-results/debug-*.png
+          retention-days: 30
+
+      # 10. Summarize test results in the GitHub UI
+      - name: Generate test summary
+        if: always()
+        run: |
+          echo "📊 Generating test summary..."
+          if [ -d "test-results" ]; then
+            echo "### Test Results Summary" >> $GITHUB_STEP_SUMMARY
+            echo "- Artifacts: playwright-report-${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY
+            COUNT=$(find test-results -type f | wc -l)
+            echo "- Files: $COUNT" >> $GITHUB_STEP_SUMMARY
           fi
-        fi
 
-    - name: Build Vite application
-      run: |
-        echo "Building front-end application..."
-        npm run build
-        echo "Copying API documentation files..."
-        cp public/openapi.yaml dist/
-        cp public/docs.html dist/
-      env:
-        VITE_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-        VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-        
+      # 11. Build your Vite front‑end
+      - name: Build Vite application
+        run: |
+          echo "Building front-end..."
+          npm run build
+          echo "Copying API docs..."
+          cp public/openapi.yaml dist/
+          cp public/docs.html    dist/
+        env:
+          VITE_SUPABASE_URL:      ${{ secrets.SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
 
+      # 12. Install Supabase CLI
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
 
-    - name: Setup Supabase CLI
-      uses: supabase/setup-cli@v1
-      with:
-        version: latest
+      # 13. Deploy Supabase Edge Functions
+      - name: Deploy Supabase Edge Functions
+        run: |
+          echo "Deploying Edge Functions..."
+          supabase login --token "${{ secrets.SUPABASE_ACCESS_TOKEN }}"
+          supabase functions deploy sec-extractor --project-ref "${{ secrets.SUPABASE_PROJECT_REF }}"
+          supabase functions deploy bdc-api        --project-ref "${{ secrets.SUPABASE_PROJECT_REF }}"
 
-    - name: Deploy Supabase Edge Functions
-      run: |
-        echo "Deploying Edge Functions..."
-        supabase login --token "${{ secrets.SUPABASE_ACCESS_TOKEN }}"
-        supabase functions deploy sec-extractor --project-ref "${{ secrets.SUPABASE_PROJECT_REF }}"
-        supabase functions deploy bdc-api --project-ref "${{ secrets.SUPABASE_PROJECT_REF }}"
+      # 14. Wait a few seconds for propagation
+      - name: Wait for function deployment
+        run: sleep 30
 
-    - name: Wait for function deployment
-      run: |
-        echo "Waiting for functions to be ready..."
-        sleep 30
+      # 15. Smoke‑test your Edge Function
+      - name: Run Edge Function Smoke Tests
+        run: |
+          echo "🧪 Running smoke tests..."
+          mkdir -p test-results
+          deno run --allow-net --allow-env tests/smoke-test.ts \
+            2>&1 | tee test-results/smoke-test-output.log
+        env:
+          SUPABASE_URL:              ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY:         ${{ secrets.SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
 
-    - name: Run Edge Function Smoke Tests
-      id: smoke-tests
-      run: |
-        echo "Running comprehensive smoke tests..."
-        mkdir -p test-results
-        deno run --allow-net --allow-env tests/smoke-test.ts 2>&1 | tee test-results/smoke-test-output.log
-      env:
-        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-        SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-        SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      # 16. Upload smoke test logs
+      - name: Upload smoke test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-test-results
+          path: test-results/
+          retention-days: 7
 
-    - name: Upload smoke test results
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: smoke-test-results
-        path: test-results/
-        retention-days: 7
-
-    - name: Verify smoke test success
-      run: |
-        if [ -f "test-results/smoke-test-output.log" ]; then
-          echo "Checking smoke test results..."
-          if grep -q "All critical tests passed!" test-results/smoke-test-output.log; then
-            echo "✅ Smoke tests passed successfully"
-          else
-            echo "❌ Smoke tests failed - check the logs"
-            cat test-results/smoke-test-output.log
+      # 17. Fail the job if smoke tests didn’t pass
+      - name: Verify smoke test success
+        run: |
+          echo "🔍 Verifying smoke tests..."
+          if ! grep -q "All critical tests passed!" test-results/smoke-test-output.log; then
+            echo "❌ Smoke tests failed"
             exit 1
           fi
-        else
-          echo "❌ Smoke test output not found"
-          exit 1
-        fi
 
-    # SLACK NOTIFICATIONS DISABLED
-    # - name: Notify smoke test results to Slack
-    #   if: always()
-    #   uses: 8398a7/action-slack@v3
-    #   with:
-    #     status: custom
-    #     custom_payload: |
-    #       {
-    #         "channel": "#dev-alerts",
-    #         "attachments": [...]
-    #       }
-    #   env:
-    #     SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      # 18. Deploy your built front‑end to Vercel
+      - name: Deploy to Vercel
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: amondnet/vercel-action@v25
+        with:
+          vercel-token:      ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id:     ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          vercel-args:       '--prod'
+          working-directory: .
 
-    # - name: Post detailed failure logs to Slack
-    #   if: failure()
-    #   run: |
-    #     echo "Slack notifications disabled"
-
-    - name: Deploy to Vercel
-      id: vercel-deploy
-      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-      uses: amondnet/vercel-action@v25
-      with:
-        vercel-token: ${{ secrets.VERCEL_TOKEN }}
-        vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
-        vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
-        vercel-args: '--prod'
-        working-directory: ./
-
-    - name: Pipeline completed successfully
-      run: |
-        echo "🎉 CI/CD Pipeline completed successfully!"
-        echo "✅ Supabase functions deployed and tested"
-        echo "✅ All smoke tests passed"
-        echo "✅ Frontend deployed to Vercel"
-        echo "🔗 Your team can access the app via Vercel URL"
-
-    # SLACK NOTIFICATIONS DISABLED
-    # - name: Notify success to Slack
-    #   if: success() && github.ref == 'refs/heads/main' && github.event_name == 'push'
-    #   uses: 8398a7/action-slack@v3
-    #   with:
-    #     status: success
-    #     channel: '#dev-status'
-    #     text: |
-    #       ✅ *Deployment Successful*
-    #   env:
-    #     SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-
-    # - name: Notify failure to Slack
-    #   if: failure()
-    #   uses: 8398a7/action-slack@v3
-    #   with:
-    #     status: failure
-    #     channel: '#dev-alerts'
-    #     text: |
-    #       ❌ *Build/Deploy Failed*
-    #   env:
-    #     SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      # 19. Celebrate! 🎉
+      - name: Pipeline completed
