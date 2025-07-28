@@ -8,6 +8,12 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
+
+    # ← Inject your Vite env‑vars here so `import.meta.env.VITE_…` works
+    env:
+      VITE_SUPABASE_URL:      ${{ secrets.VITE_SUPABASE_URL }}
+      VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -33,26 +39,22 @@ jobs:
     name: Deploy to Vercel
     needs: build
     runs-on: ubuntu-latest
+
     steps:
-      # 1️⃣ Check out your full repo (so the Action can find .git, package.json, vercel.json, etc.)
       - name: Checkout code
         uses: actions/checkout@v3
 
-      # 2️⃣ Download the build artifact (optional: you can inspect it, but we won't deploy from there)
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
           name: dist
           path: dist/
 
-      # 3️⃣ Deploy from the repo root—Vercel will run your build itself
       - name: Deploy to Vercel
         uses: amondnet/vercel-action@v20
         with:
           vercel-token:       ${{ secrets.VERCEL_TOKEN }}
           vercel-org-id:      ${{ secrets.VERCEL_ORG_ID }}
           vercel-project-id:  ${{ secrets.VERCEL_PROJECT_ID }}
-          # point at repo root so it picks up package.json & vercel.json
           working-directory:  .
-          # force a prod deploy
-          vercel-args:        '--prod'
+          vercel-args:        '--prod --prebuilt'
