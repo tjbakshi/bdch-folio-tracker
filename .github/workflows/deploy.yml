@@ -1,3 +1,4 @@
+# File: .github/workflows/deploy.yml
 name: Build & Deploy to Vercel
 
 on:
@@ -32,6 +33,7 @@ jobs:
           cp public/openapi.yaml dist/
           cp public/docs.html dist/
         env:
+          # VITE_‑prefixed vars are required for Vite at build time
           VITE_SUPABASE_URL:      ${{ secrets.SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
 
@@ -54,5 +56,5 @@ jobs:
           vercel-token:      ${{ secrets.VERCEL_TOKEN }}
           vercel-org-id:     ${{ secrets.VERCEL_ORG_ID }}
           vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
-          vercel-args:       --prod
+          vercel-args:       '--prod'
           working-directory: .
